@@ -26,21 +26,28 @@ class CustomersScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: open,
-        icon: const Icon(Icons.person_add_alt_1),
-        label: Text(tr('Add customer')),
-      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Text(
-              tr('Customers'),
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    tr('Customers'),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(minimumSize: const Size(64, 40)),
+                  onPressed: open,
+                  icon: const Icon(Icons.person_add_alt_1),
+                  label: Text(tr('Add customer')),
+                ),
+              ],
             ),
           ),
           Padding(
@@ -66,7 +73,7 @@ class CustomersScreen extends ConsumerWidget {
                   );
                 }
                 return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
                   itemCount: list.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (_, i) => _CustomerTile(

@@ -626,3 +626,20 @@ class BookingRepo {
 }
 
 final bookingRepoProvider = Provider<BookingRepo>((_) => BookingRepo());
+
+/// What the Bookings list is showing.
+final bookingFilterProvider = StateProvider.autoDispose<BookingFilter>(
+  (_) => BookingFilter.upcoming,
+);
+final bookingSearchProvider = StateProvider.autoDispose<String>((_) => '');
+
+final bookingsProvider = FutureProvider.autoDispose<List<Booking>>((ref) {
+  final filter = ref.watch(bookingFilterProvider);
+  final q = ref.watch(bookingSearchProvider);
+  return ref.watch(bookingRepoProvider).list(filter: filter, query: q);
+});
+
+/// One booking with its lines, payments and photos.
+final bookingProvider = FutureProvider.autoDispose.family<Booking?, int>(
+  (ref, id) => ref.watch(bookingRepoProvider).get(id),
+);

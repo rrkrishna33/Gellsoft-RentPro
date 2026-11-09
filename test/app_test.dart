@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gellsoft_rentpro/core/theme.dart';
+import 'package:gellsoft_rentpro/data/booking_models.dart';
+import 'package:gellsoft_rentpro/data/booking_repo.dart';
 import 'package:gellsoft_rentpro/data/dashboard_repo.dart';
 import 'package:gellsoft_rentpro/data/models.dart';
 import 'package:gellsoft_rentpro/data/repositories.dart';
@@ -20,6 +22,26 @@ class _FakeDashboard extends DashboardRepo {
         balanceDue: 1500,
         collectedThisMonth: 4200,
       );
+}
+
+class _NoBookings extends BookingRepo {
+  @override
+  Future<List<Booking>> list({
+    BookingFilter filter = BookingFilter.upcoming,
+    String query = '',
+  }) async => const [];
+
+  @override
+  Future<int> freeLeft([DateTime? now]) async => 12;
+
+  @override
+  Future<Map<int, ItemConflict>> conflicts({
+    required List<int> itemIds,
+    required DateTime pickup,
+    required DateTime ret,
+    int? exceptBookingId,
+    DateTime? now,
+  }) async => const {};
 }
 
 class _NoItems extends ItemRepo {
@@ -44,6 +66,7 @@ Future<void> settle(WidgetTester t) async {
 Widget app() => ProviderScope(
   overrides: [
     dashboardRepoProvider.overrideWithValue(_FakeDashboard()),
+    bookingRepoProvider.overrideWithValue(_NoBookings()),
     itemRepoProvider.overrideWithValue(_NoItems()),
     customerRepoProvider.overrideWithValue(_NoCustomers()),
   ],
@@ -110,13 +133,35 @@ void main() {
     await t.pumpWidget(app());
     await settle(t);
 
+    // the bar at the bottom
     await t.tap(find.text('Bookings'));
     await settle(t);
-    expect(find.text('Bookings will appear here.'), findsOneWidget);
+    expect(
+      find.text('No upcoming bookings. Tap + to make one.'),
+      findsOneWidget,
+    );
     await t.tap(find.text('Items'));
     await settle(t);
-    expect(find.text('Add the things you rent out, with their rate.'), findsOneWidget);
-    await t.tap(find.text('Settings'));
+    expect(
+      find.text('Add the things you rent out, with their rate.'),
+      findsOneWidget,
+    );
+    await t.tap(find.text('Customers'));
+    await settle(t);
+    expect(
+      find.text('Add your customers to book items for them.'),
+      findsOneWidget,
+    );
+    // the middle button makes a booking
+    await t.tap(find.byTooltip('New booking'));
+    await settle(t);
+    expect(find.text('New booking'), findsWidgets);
+    await t.pageBack();
+    await settle(t);
+    // Settings opens from the Home page
+    await t.tap(find.text('Home'));
+    await settle(t);
+    await t.tap(find.byTooltip('Settings'));
     await settle(t);
     expect(find.text('Royal Costumes'), findsOneWidget);
     expect(find.text('Costume / Dress rental'), findsOneWidget);

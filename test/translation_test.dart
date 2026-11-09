@@ -2,13 +2,15 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gellsoft_rentpro/core/constants.dart';
+import 'package:gellsoft_rentpro/data/booking_models.dart';
+import 'package:gellsoft_rentpro/data/booking_repo.dart';
 import 'package:gellsoft_rentpro/data/models.dart';
 import 'package:gellsoft_rentpro/l10n/strings.dart';
 import 'package:gellsoft_rentpro/l10n/ta.dart';
 import 'package:gellsoft_rentpro/subscription/plan.dart';
 
 /// Shown the same in every language on purpose.
-const keepEnglish = <String>{'WhatsApp', 'PIN'};
+const keepEnglish = <String>{'WhatsApp', 'PIN', 'UPI'};
 
 String unescape(String s) => s
     .replaceAll(r'\n', '\n')
@@ -36,7 +38,11 @@ Set<String> phrasesInCode() {
     ..addAll(ShopType.values.expand((t) => t.categories))
     ..addAll(ProFeature.values.map((f) => f.en))
     ..addAll(RateType.values.map((r) => r.en))
-    ..addAll(ItemStatus.values.map((s) => s.en));
+    ..addAll(ItemStatus.values.map((s) => s.en))
+    ..addAll(BookingStatus.values.map((s) => s.en))
+    ..addAll(PaymentKind.values.map((k) => k.en))
+    ..addAll(PayMode.values.map((m) => m.en))
+    ..addAll(BookingFilter.values.map((f) => f.en));
   return out;
 }
 

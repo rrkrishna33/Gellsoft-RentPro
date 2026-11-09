@@ -4,9 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/format.dart';
 import '../../core/theme.dart';
 import '../../data/app_settings.dart';
+import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
 import '../../data/dashboard_repo.dart';
 import '../../l10n/strings.dart';
+import '../../core/pressable.dart';
+import '../bookings/booking_detail_screen.dart';
+import '../bookings/booking_form_screen.dart';
+import '../bookings/bookings_screen.dart';
 import '../customers/customers_screen.dart';
 import '../items/items_screen.dart';
 import '../settings/settings_screen.dart';
@@ -24,51 +29,145 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _tab = 0;
 
+  Future<void> _newBooking() async {
+    final id = await Navigator.of(context).push<int>(
+      MaterialPageRoute<int>(builder: (_) => const BookingFormScreen()),
+    );
+    ref.invalidate(bookingsProvider);
+    ref.invalidate(dashboardProvider);
+    if (id != null && mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => BookingDetailScreen(bookingId: id),
+        ),
+      );
+      ref.invalidate(bookingsProvider);
+      ref.invalidate(dashboardProvider);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
       _HomeTab(profile: widget.profile),
-      _SoonTab(
-        title: tr('Bookings'),
-        icon: Icons.event_available_outlined,
-        line: tr('Bookings will appear here.'),
-      ),
+      const BookingsScreen(),
       const ItemsScreen(),
       const CustomersScreen(),
-      const SettingsScreen(),
     ];
-    return Scaffold(
-      body: RentBackground(child: SafeArea(child: pages[_tab])),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: [
-          NavigationDestination(
-            icon: const Icon(Icons.home_outlined),
-            selectedIcon: const Icon(Icons.home),
-            label: tr('Home'),
+    return RentBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Stack(
+          children: [
+            SafeArea(bottom: false, child: pages[_tab]),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 0,
+              child: _NavBar(
+                index: _tab,
+                onTab: (i) {
+                  setState(() => _tab = i);
+                  if (i == 0) ref.invalidate(dashboardProvider);
+                },
+                onNew: _newBooking,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The floating bar at the bottom: the screens used most, and a big button in
+/// the middle to make a new booking.
+class _NavBar extends StatelessWidget {
+  const _NavBar({
+    required this.index,
+    required this.onTab,
+    required this.onNew,
+  });
+  final int index;
+  final ValueChanged<int> onTab;
+  final VoidCallback onNew;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = RentStyle.of(context);
+    final bottom = MediaQuery.paddingOf(context).bottom;
+
+    Widget item(IconData icon, String label, int i) {
+      final on = index == i;
+      final color = on
+          ? theme.colorScheme.primary
+          : theme.colorScheme.onSurfaceVariant;
+      return Expanded(
+        child: InkWell(
+          onTap: () => onTab(i),
+          borderRadius: BorderRadius.circular(16),
+          child: Semantics(
+            label: label,
+            button: true,
+            selected: on,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 24, color: color),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: color,
+                    fontWeight: on ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
-          NavigationDestination(
-            icon: const Icon(Icons.event_available_outlined),
-            selectedIcon: const Icon(Icons.event_available),
-            label: tr('Bookings'),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: 12 + bottom),
+      child: SizedBox(
+        height: 64,
+        // A Material, not a plain box: the button's gradient is painted on the
+        // nearest Material, and must land above the bar.
+        child: Material(
+          color: theme.colorScheme.surface,
+          elevation: 10,
+          shadowColor: const Color(0x66000000),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(26),
+            side: BorderSide(color: theme.colorScheme.outlineVariant),
           ),
-          NavigationDestination(
-            icon: const Icon(Icons.checkroom_outlined),
-            selectedIcon: const Icon(Icons.checkroom),
-            label: tr('Items'),
+          child: Row(
+            children: [
+              item(Icons.home_rounded, tr('Home'), 0),
+              item(Icons.event_available_outlined, tr('Bookings'), 1),
+              Tooltip(
+                message: tr('New booking'),
+                child: Pressable(
+                  onTap: onNew,
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    gradient: style.cta,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: style.heroShadow,
+                  ),
+                  child: Icon(Icons.add, size: 30, color: style.onCta),
+                ),
+              ),
+              item(Icons.checkroom_outlined, tr('Items'), 2),
+              item(Icons.people_alt_outlined, tr('Customers'), 3),
+            ],
           ),
-          NavigationDestination(
-            icon: const Icon(Icons.people_alt_outlined),
-            selectedIcon: const Icon(Icons.people_alt),
-            label: tr('Customers'),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.settings_outlined),
-            selectedIcon: const Icon(Icons.settings),
-            label: tr('Settings'),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -90,7 +189,7 @@ class _HomeTab extends ConsumerWidget {
     return RefreshIndicator(
       onRefresh: () => ref.refresh(dashboardProvider.future),
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
         children: [
           Row(
             children: [
@@ -106,6 +205,18 @@ class _HomeTab extends ConsumerWidget {
                 tooltip: hide ? tr('Show amounts') : tr('Hide amounts'),
                 icon: Icon(hide ? Icons.visibility_off : Icons.visibility),
                 onPressed: () => ref.read(hideAmountsProvider.notifier).toggle(),
+              ),
+              IconButton(
+                tooltip: tr('Settings'),
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => Scaffold(
+                      appBar: AppBar(title: Text(tr('Settings'))),
+                      body: const RentBackground(child: SettingsScreen()),
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
@@ -236,44 +347,6 @@ class _Stat extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _SoonTab extends StatelessWidget {
-  const _SoonTab({required this.title, required this.icon, required this.line});
-  final String title;
-  final IconData icon;
-  final String line;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-          child: Text(
-            title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-          ),
-        ),
-        Expanded(
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 56, color: scheme.primary.withValues(alpha: 0.5)),
-                const SizedBox(height: 12),
-                Text(line, style: Theme.of(context).textTheme.bodyMedium),
-              ],
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

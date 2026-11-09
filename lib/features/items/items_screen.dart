@@ -27,21 +27,28 @@ class ItemsScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: open,
-        icon: const Icon(Icons.add),
-        label: Text(tr('Add item')),
-      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Text(
-              tr('Items'),
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    tr('Items'),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(minimumSize: const Size(64, 40)),
+                  onPressed: open,
+                  icon: const Icon(Icons.add),
+                  label: Text(tr('Add item')),
+                ),
+              ],
             ),
           ),
           Padding(
@@ -66,7 +73,7 @@ class ItemsScreen extends ConsumerWidget {
                   );
                 }
                 return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
                   itemCount: list.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (_, i) => _ItemTile(

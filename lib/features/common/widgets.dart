@@ -7,6 +7,7 @@ Future<bool> confirmRemove(
   BuildContext context, {
   required String title,
   required String message,
+  String? action,
 }) async {
   final ok = await showDialog<bool>(
     context: context,
@@ -24,7 +25,7 @@ Future<bool> confirmRemove(
             minimumSize: const Size(64, 44),
           ),
           onPressed: () => Navigator.pop(ctx, true),
-          child: Text(tr('Remove')),
+          child: Text(action ?? tr('Remove')),
         ),
       ],
     ),
