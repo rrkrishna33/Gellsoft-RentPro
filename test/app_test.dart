@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gellsoft_rentpro/core/theme.dart';
 import 'package:gellsoft_rentpro/data/dashboard_repo.dart';
+import 'package:gellsoft_rentpro/data/models.dart';
+import 'package:gellsoft_rentpro/data/repositories.dart';
 import 'package:gellsoft_rentpro/l10n/strings.dart';
 import 'package:gellsoft_rentpro/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,6 +22,19 @@ class _FakeDashboard extends DashboardRepo {
       );
 }
 
+class _NoItems extends ItemRepo {
+  @override
+  Future<List<RentItem>> list({
+    String query = '',
+    bool includeRetired = false,
+  }) async => const [];
+}
+
+class _NoCustomers extends CustomerRepo {
+  @override
+  Future<List<Customer>> list({String query = ''}) async => const [];
+}
+
 Future<void> settle(WidgetTester t) async {
   for (var i = 0; i < 10; i++) {
     await t.pump(const Duration(milliseconds: 300));
@@ -27,7 +42,11 @@ Future<void> settle(WidgetTester t) async {
 }
 
 Widget app() => ProviderScope(
-  overrides: [dashboardRepoProvider.overrideWithValue(_FakeDashboard())],
+  overrides: [
+    dashboardRepoProvider.overrideWithValue(_FakeDashboard()),
+    itemRepoProvider.overrideWithValue(_NoItems()),
+    customerRepoProvider.overrideWithValue(_NoCustomers()),
+  ],
   child: const GellsoftRentProApp(),
 );
 
@@ -96,7 +115,7 @@ void main() {
     expect(find.text('Bookings will appear here.'), findsOneWidget);
     await t.tap(find.text('Items'));
     await settle(t);
-    expect(find.text('The things you rent out will appear here.'), findsOneWidget);
+    expect(find.text('Add the things you rent out, with their rate.'), findsOneWidget);
     await t.tap(find.text('Settings'));
     await settle(t);
     expect(find.text('Royal Costumes'), findsOneWidget);

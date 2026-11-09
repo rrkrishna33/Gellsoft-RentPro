@@ -48,9 +48,6 @@ const taStrings = <String, String>{
   'Customers': 'வாடிக்கையாளர்கள்',
   'Settings': 'அமைப்புகள்',
   'Bookings will appear here.': 'முன்பதிவுகள் இங்கே தெரியும்.',
-  'The things you rent out will appear here.':
-      'நீங்கள் வாடகைக்கு விடும் பொருட்கள் இங்கே தெரியும்.',
-  'Your customers will appear here.': 'உங்கள் வாடிக்கையாளர்கள் இங்கே தெரிவார்கள்.',
   'Show amounts': 'தொகைகளைக் காட்டு',
   'Hide amounts': 'தொகைகளை மறை',
   'Collected this month': 'இந்த மாதம் வசூலானது',
@@ -59,6 +56,58 @@ const taStrings = <String, String>{
   'Returns today': 'இன்று திரும்புவது',
   'Overdue returns': 'தாமதமான திருப்பங்கள்',
   'Events this week': 'இந்த வார நிகழ்ச்சிகள்',
+
+  // Items
+  'Add item': 'பொருளைச் சேர்',
+  'Edit item': 'பொருளை மாற்று',
+  'Search items': 'பொருட்களைத் தேடு',
+  'No item matches your search.': 'தேடலுக்குப் பொருந்தும் பொருள் இல்லை.',
+  'Add the things you rent out, with their rate.':
+      'நீங்கள் வாடகைக்கு விடும் பொருட்களை அவற்றின் வாடகையுடன் சேர்க்கவும்.',
+  'a day': 'ஒரு நாளுக்கு',
+  'an event': 'ஒரு நிகழ்வுக்கு',
+  'Item name': 'பொருளின் பெயர்',
+  'Enter the item name': 'பொருளின் பெயரை உள்ளிடவும்',
+  'Category': 'வகை',
+  'Size (optional)': 'அளவு (விருப்பம்)',
+  'Rent (₹)': 'வாடகை (₹)',
+  'Deposit (₹)': 'முன்வைப்புத் தொகை (₹)',
+  'Enter the rent': 'வாடகையை உள்ளிடவும்',
+  'Status': 'நிலை',
+  'Notes (optional)': 'குறிப்புகள் (விருப்பம்)',
+  'Per event': 'நிகழ்வுக்கு',
+  'Per day': 'நாளுக்கு',
+  'Available': 'கிடைக்கும்',
+  'In repair': 'பழுதுபார்ப்பில்',
+  'Retired': 'நீக்கப்பட்டது',
+  'Remove this item?': 'இந்தப் பொருளை நீக்கவா?',
+  'It will no longer be offered for new bookings. Old bookings keep it.':
+      'புதிய முன்பதிவுகளுக்கு இது இனி வராது. பழைய முன்பதிவுகளில் இருக்கும்.',
+
+  // Customers
+  'Add customer': 'வாடிக்கையாளரைச் சேர்',
+  'Edit customer': 'வாடிக்கையாளரை மாற்று',
+  'Search by name or phone': 'பெயர் அல்லது தொலைபேசியால் தேடு',
+  'No customer matches your search.':
+      'தேடலுக்குப் பொருந்தும் வாடிக்கையாளர் இல்லை.',
+  'Add your customers to book items for them.':
+      'அவர்களுக்குப் பொருட்களை முன்பதிவு செய்ய வாடிக்கையாளர்களைச் சேர்க்கவும்.',
+  'Customer name': 'வாடிக்கையாளர் பெயர்',
+  'Enter the customer name': 'வாடிக்கையாளர் பெயரை உள்ளிடவும்',
+  'ID shown (optional)': 'காட்டிய அடையாள அட்டை (விருப்பம்)',
+  'For example: Aadhaar ending 1234': 'எடுத்துக்காட்டு: ஆதார் எண் 1234 இல் முடிவது',
+  'Same phone number': 'அதே தொலைபேசி எண்',
+  '{name} already has this phone number. Save anyway?':
+      '{name} என்பவரிடம் ஏற்கனவே இந்த எண் உள்ளது. இருந்தாலும் சேமிக்கவா?',
+  'Save anyway': 'இருந்தாலும் சேமி',
+  'Remove this customer?': 'இந்த வாடிக்கையாளரை நீக்கவா?',
+  'Their old bookings stay. They will leave the customer list.':
+      'அவர்களின் பழைய முன்பதிவுகள் இருக்கும். வாடிக்கையாளர் பட்டியலிலிருந்து நீங்குவார்கள்.',
+
+  // Shared
+  'Cancel': 'ரத்து',
+  'Remove': 'நீக்கு',
+  'Error: {e}': 'பிழை: {e}',
 
   // Settings
   'Language': 'மொழி',

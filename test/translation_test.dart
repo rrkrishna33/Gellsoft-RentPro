@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gellsoft_rentpro/core/constants.dart';
+import 'package:gellsoft_rentpro/data/models.dart';
 import 'package:gellsoft_rentpro/l10n/strings.dart';
 import 'package:gellsoft_rentpro/l10n/ta.dart';
 import 'package:gellsoft_rentpro/subscription/plan.dart';
@@ -33,7 +34,9 @@ Set<String> phrasesInCode() {
   out
     ..addAll(ShopType.values.map((t) => t.en))
     ..addAll(ShopType.values.expand((t) => t.categories))
-    ..addAll(ProFeature.values.map((f) => f.en));
+    ..addAll(ProFeature.values.map((f) => f.en))
+    ..addAll(RateType.values.map((r) => r.en))
+    ..addAll(ItemStatus.values.map((s) => s.en));
   return out;
 }
 

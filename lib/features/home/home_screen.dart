@@ -7,6 +7,8 @@ import '../../data/app_settings.dart';
 import '../../data/business_profile.dart';
 import '../../data/dashboard_repo.dart';
 import '../../l10n/strings.dart';
+import '../customers/customers_screen.dart';
+import '../items/items_screen.dart';
 import '../settings/settings_screen.dart';
 
 /// The app's frame: Home, Bookings, Items, Customers and More, with a bar at
@@ -31,16 +33,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         icon: Icons.event_available_outlined,
         line: tr('Bookings will appear here.'),
       ),
-      _SoonTab(
-        title: tr('Items'),
-        icon: Icons.checkroom_outlined,
-        line: tr('The things you rent out will appear here.'),
-      ),
-      _SoonTab(
-        title: tr('Customers'),
-        icon: Icons.people_alt_outlined,
-        line: tr('Your customers will appear here.'),
-      ),
+      const ItemsScreen(),
+      const CustomersScreen(),
       const SettingsScreen(),
     ];
     return Scaffold(
