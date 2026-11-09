@@ -136,15 +136,18 @@ class AppDatabase {
       'CREATE INDEX idx_bookings_created ON bookings(created_at)',
     );
 
-    // The items on a booking, with the rate they were booked at.
+    // The items on a booking, with the rate they were booked at and what that
+    // came to for the booked days (amount).
     await d.execute('''
       CREATE TABLE booking_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
         item_id INTEGER NOT NULL REFERENCES items(id),
         name TEXT NOT NULL,
+        rate_type TEXT NOT NULL DEFAULT 'event',
         rate REAL NOT NULL DEFAULT 0,
-        deposit REAL NOT NULL DEFAULT 0
+        deposit REAL NOT NULL DEFAULT 0,
+        amount REAL NOT NULL DEFAULT 0
       )''');
     await d.execute(
       'CREATE INDEX idx_booking_items_item ON booking_items(item_id)',
