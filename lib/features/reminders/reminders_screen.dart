@@ -45,7 +45,7 @@ class RemindersScreen extends ConsumerWidget {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
                 children: [
-                  for (final kind in ReminderKind.values)
+                  for (final kind in _order)
                     if (sections[kind] != null) ...[
                       Padding(
                         padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
@@ -70,6 +70,14 @@ class RemindersScreen extends ConsumerWidget {
     );
   }
 }
+
+/// The most urgent first.
+const _order = [
+  ReminderKind.overdue,
+  ReminderKind.returnDue,
+  ReminderKind.sendItems,
+  ReminderKind.balance,
+];
 
 String reminderTitle(ReminderKind k) => switch (k) {
   ReminderKind.overdue => tr('Overdue returns'),

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/widgets.dart' as pw;
 
@@ -10,6 +11,11 @@ class PdfTextKit {
   final pw.Font _regular, _bold;
 
   static Future<PdfTextKit>? _loading;
+
+  /// Forgets the loaded fonts so the next document loads them again. Tests
+  /// use it so one test's fonts are not carried into the next.
+  @visibleForTesting
+  static void resetForTests() => _loading = null;
 
   /// Loads the bundled Tamil fonts once.
   static Future<PdfTextKit> load() => _loading ??= () async {
