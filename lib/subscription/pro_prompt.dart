@@ -63,4 +63,7 @@ String _why(ProFeature f) => switch (f) {
     {'n': FreePlan.photosPerBooking},
   ),
   ProFeature.notifications => tr('Reminder notifications are part of Pro.'),
+  ProFeature.autoBackup => tr(
+    'Backing up every day without asking is part of Pro.',
+  ),
 };

@@ -40,7 +40,12 @@ class _GellsoftRentProAppState extends ConsumerState<GellsoftRentProApp>
       if (mounted) setState(() => _minSplashDone = true);
     });
     // the plan check runs in the background and never holds the app up
-    startSubscriptionServices(ref);
+    startSubscriptionServices(ref).whenComplete(() => runAutoBackup(ref));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) runAutoBackup(ref);
   }
 
   @override

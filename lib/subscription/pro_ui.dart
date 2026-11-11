@@ -93,6 +93,7 @@ class _UpgradeBody extends ConsumerWidget {
       tr('Unlimited bookings every month'),
       tr('Unlimited photos on every booking'),
       tr('Daily and custom reminder notifications'),
+      tr('Automatic daily backup to Google Drive'),
     ];
     final freeItems = [
       tr('{n} new bookings every month', {'n': FreePlan.bookingsPerMonth}),

@@ -13,6 +13,10 @@ String money(double v) => _inr.format(v);
 /// A date written for lists and receipts, for example "05 Mar 2027".
 String dateText(DateTime d) => DateFormat('dd MMM yyyy').format(d);
 
+/// A date and time, for example "05 Mar 2027, 06:30 PM".
+String dateTimeText(DateTime d) =>
+    DateFormat('dd MMM yyyy, hh:mm a').format(d);
+
 /// The calendar day of [d] at midnight. Bookings store whole days, so two
 /// dates on the same day always compare equal.
 DateTime dayOf(DateTime d) => DateTime(d.year, d.month, d.day);

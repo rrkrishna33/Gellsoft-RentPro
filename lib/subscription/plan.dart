@@ -29,7 +29,8 @@ enum Tier { free, trial, pro }
 enum ProFeature {
   unlimitedBookings('Unlimited bookings every month'),
   unlimitedPhotos('Unlimited photos on every booking'),
-  notifications('Daily and custom reminder notifications');
+  notifications('Daily and custom reminder notifications'),
+  autoBackup('Automatic daily backup to Google Drive');
 
   /// English wording; also the translation key (see `tr`).
   final String en;

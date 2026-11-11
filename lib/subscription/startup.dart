@@ -1,9 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/cloud_backup.dart';
 import 'billing.dart';
 import 'clock_gate.dart';
 import 'license_state.dart';
 import 'license_sync.dart';
+import 'plan.dart';
 
 /// Runs once when the app opens, in the background; booking never waits for it.
 ///
@@ -30,6 +32,20 @@ Future<void> startSubscriptionServices(WidgetRef ref) async {
       final asked = await ref.read(billingProvider.notifier).restoreQuietly();
       if (asked) await sync.markAutoRestored();
     }
+  } catch (_) {
+    // never let this break the app
+  }
+}
+
+/// The daily Google Drive backup, for plans that include it. Runs when the app
+/// opens and whenever it comes back to the front; it does nothing unless Drive
+/// backup is on and a day has passed. Quiet: no screens, and any failure is
+/// ignored (it waits an hour, then tries again).
+Future<void> runAutoBackup(WidgetRef ref) async {
+  try {
+    final license = await ref.read(licenseProvider.future);
+    if (!license.entitlement.allows(ProFeature.autoBackup)) return;
+    await ref.read(cloudBackupProvider).autoBackupIfDue();
   } catch (_) {
     // never let this break the app
   }

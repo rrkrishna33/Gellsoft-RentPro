@@ -13,6 +13,7 @@ import '../../subscription/pro_prompt.dart';
 import '../../subscription/pro_ui.dart';
 import '../onboarding/onboarding_screen.dart';
 import 'account_screen.dart';
+import 'backup_screen.dart';
 import 'billing_settings_screen.dart';
 
 /// Shop details, language, theme and the app version.
@@ -132,6 +133,18 @@ class SettingsScreen extends ConsumerWidget {
                 ),
               ),
             ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.cloud_upload_outlined),
+            title: Text(tr('Backup and restore')),
+            subtitle: Text(tr('Keep your data safe, or move it to a new phone')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const BackupScreen()),
+            ),
           ),
         ),
         const SizedBox(height: 12),
