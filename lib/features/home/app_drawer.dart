@@ -8,6 +8,8 @@ import '../../l10n/strings.dart';
 import '../invoices/invoice_list_screen.dart';
 import '../reminders/reminders_screen.dart';
 import '../reports/reports_screen.dart';
+import '../../subscription/pro_ui.dart';
+import '../settings/account_screen.dart';
 import '../settings/billing_settings_screen.dart';
 import 'home_screen.dart';
 
@@ -79,6 +81,15 @@ class AppDrawer extends ConsumerWidget {
                   item(Icons.bar_chart_rounded, tr('Reports'), const ReportsScreen()),
                   const Divider(),
                   item(Icons.percent_rounded, tr('Billing and GST'), const BillingSettingsScreen()),
+                  item(Icons.account_circle_outlined, tr('Account'), const AccountScreen()),
+                  ListTile(
+                    leading: const Icon(Icons.workspace_premium_outlined),
+                    title: const Text('GellSoft Pro'),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      showUpgradeScreen(context);
+                    },
+                  ),
                   item(Icons.settings_outlined, tr('Settings'), settingsPage()),
                 ],
               ),

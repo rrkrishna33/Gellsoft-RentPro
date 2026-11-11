@@ -11,6 +11,8 @@ import 'features/home/home_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/splash/splash_screen.dart';
 import 'l10n/strings.dart';
+import 'subscription/clock_gate.dart';
+import 'subscription/startup.dart';
 
 void main() {
   runApp(
@@ -25,16 +27,26 @@ class GellsoftRentProApp extends ConsumerStatefulWidget {
   ConsumerState<GellsoftRentProApp> createState() => _GellsoftRentProAppState();
 }
 
-class _GellsoftRentProAppState extends ConsumerState<GellsoftRentProApp> {
+class _GellsoftRentProAppState extends ConsumerState<GellsoftRentProApp>
+    with WidgetsBindingObserver {
   /// Keeps the splash up briefly even when the profile loads instantly.
   bool _minSplashDone = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     Future.delayed(const Duration(milliseconds: 1200), () {
       if (mounted) setState(() => _minSplashDone = true);
     });
+    // the plan check runs in the background and never holds the app up
+    startSubscriptionServices(ref);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override
@@ -57,6 +69,8 @@ class _GellsoftRentProAppState extends ConsumerState<GellsoftRentProApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
+      // the clock check sits above everything
+      builder: (context, child) => ClockGate(child: child ?? const SizedBox()),
       home: !_minSplashDone
           ? const SplashScreen()
           : profile.when(

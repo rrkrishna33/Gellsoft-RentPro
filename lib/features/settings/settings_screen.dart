@@ -10,7 +10,9 @@ import '../../data/notifications.dart';
 import '../../subscription/entitlement.dart';
 import '../../subscription/plan.dart';
 import '../../subscription/pro_prompt.dart';
+import '../../subscription/pro_ui.dart';
 import '../onboarding/onboarding_screen.dart';
+import 'account_screen.dart';
 import 'billing_settings_screen.dart';
 
 /// Shop details, language, theme and the app version.
@@ -97,6 +99,36 @@ class SettingsScreen extends ConsumerWidget {
                       ref.read(appSettingsProvider.notifier).setThemeMode(m);
                     }
                   },
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.workspace_premium_outlined),
+                title: const Text('GellSoft Pro'),
+                subtitle: Text(
+                  planSummary(
+                    ref.watch(entitlementProvider),
+                    DateTime.now(),
+                    null,
+                  ),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => showUpgradeScreen(context),
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.account_circle_outlined),
+                title: Text(tr('Account')),
+                subtitle: Text(tr('Sign in with Google to back up and restore')),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const AccountScreen()),
                 ),
               ),
             ],

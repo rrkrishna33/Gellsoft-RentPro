@@ -10,7 +10,7 @@ import 'package:gellsoft_rentpro/l10n/ta.dart';
 import 'package:gellsoft_rentpro/subscription/plan.dart';
 
 /// Shown the same in every language on purpose.
-const keepEnglish = <String>{'WhatsApp', 'PIN', 'UPI'};
+const keepEnglish = <String>{'WhatsApp', 'PIN', 'UPI', 'GST', 'GellSoft Pro'};
 
 String unescape(String s) => s
     .replaceAll(r'\n', '\n')

@@ -32,6 +32,9 @@ class _NoBookings extends BookingRepo {
   }) async => const [];
 
   @override
+  Future<List<Booking>> forReminders() async => const [];
+
+  @override
   Future<int> freeLeft([DateTime? now]) async => 12;
 
   @override
@@ -93,10 +96,13 @@ void main() {
 
     expect(find.text('Royal Costumes'), findsOneWidget);
     expect(find.text('Collected this month'), findsOneWidget);
-    expect(find.text('Pickups today'), findsOneWidget);
-    expect(find.text('Overdue returns'), findsOneWidget);
-    expect(find.text('3'), findsOneWidget); // overdue
+    expect(find.text('To collect'), findsOneWidget);
+    expect(find.text('Out today'), findsOneWidget);
+    expect(find.text('Back today'), findsOneWidget);
+    expect(find.text('Overdue'), findsOneWidget);
     expect(find.textContaining('4,200'), findsOneWidget);
+    expect(find.textContaining('1,500'), findsOneWidget);
+    expect(find.text('3'), findsOneWidget, reason: 'overdue');
 
     final sp = await SharedPreferences.getInstance();
     expect(sp.getString('b_name'), 'Royal Costumes');
@@ -114,18 +120,17 @@ void main() {
 
     expect(find.text('Royal Costumes'), findsOneWidget);
     expect(find.textContaining('4,200'), findsOneWidget);
-    await t.tap(find.byIcon(Icons.visibility));
+    await t.tap(find.byIcon(Icons.visibility_outlined));
     await settle(t);
     expect(find.textContaining('4,200'), findsNothing);
-    expect(find.text('••••'), findsNWidgets(2));
-    await t.tap(find.byIcon(Icons.visibility_off));
+    expect(find.textContaining('1,500'), findsNothing);
+    expect(find.text('₹ ••••••'), findsNWidgets(2));
+    await t.tap(find.byIcon(Icons.visibility_off_outlined));
     await settle(t);
     expect(find.textContaining('4,200'), findsOneWidget);
   });
 
-  testWidgets('the bar moves between the tabs, Settings shows the shop', (
-    t,
-  ) async {
+  testWidgets('the floating bar moves between the pages', (t) async {
     SharedPreferences.setMockInitialValues({
       'b_name': 'Royal Costumes',
       'b_type': 'costume',
@@ -133,20 +138,20 @@ void main() {
     await t.pumpWidget(app());
     await settle(t);
 
-    // the bar at the bottom
-    await t.tap(find.text('Bookings'));
+    // the bar is drawn last, so its labels are the last of their name
+    await t.tap(find.text('Bookings').last);
     await settle(t);
     expect(
       find.text('No upcoming bookings. Tap + to make one.'),
       findsOneWidget,
     );
-    await t.tap(find.text('Items'));
+    await t.tap(find.text('Items').last);
     await settle(t);
     expect(
       find.text('Add the things you rent out, with their rate.'),
       findsOneWidget,
     );
-    await t.tap(find.text('Customers'));
+    await t.tap(find.text('Customers').last);
     await settle(t);
     expect(
       find.text('Add your customers to book items for them.'),
@@ -158,14 +163,43 @@ void main() {
     expect(find.text('New booking'), findsWidgets);
     await t.pageBack();
     await settle(t);
-    // Settings opens from the Home page
-    await t.tap(find.text('Home'));
+    await t.tap(find.text('Home').last);
     await settle(t);
-    await t.tap(find.byTooltip('Settings'));
+    expect(find.text('Collected this month'), findsOneWidget);
+  });
+
+  testWidgets('the shortcut tiles open Reminders and Settings; the menu opens', (
+    t,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'b_name': 'Royal Costumes',
+      'b_type': 'costume',
+    });
+    t.view.physicalSize = const Size(900, 2400);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    await t.pumpWidget(app());
     await settle(t);
-    expect(find.text('Royal Costumes'), findsOneWidget);
+
+    await t.tap(find.text('Reminders'));
+    await settle(t);
+    expect(find.text('Nothing needs your attention right now.'), findsOneWidget);
+    await t.pageBack();
+    await settle(t);
+
+    await t.tap(find.text('Settings').first);
+    await settle(t);
     expect(find.text('Costume / Dress rental'), findsOneWidget);
     expect(find.textContaining('Version'), findsOneWidget);
+    expect(find.text('GellSoft Pro'), findsOneWidget);
+    await t.pageBack();
+    await settle(t);
+
+    await t.tap(find.byIcon(Icons.menu));
+    await settle(t);
+    expect(find.text('Invoices'), findsWidgets);
+    expect(find.text('Account'), findsOneWidget);
+    expect(find.text('GellSoft Pro'), findsOneWidget);
   });
 
   testWidgets('the Tamil language shows Tamil', (t) async {
@@ -177,7 +211,8 @@ void main() {
     await t.pumpWidget(app());
     await settle(t);
     expect(find.text('முகப்பு'), findsOneWidget);
-    expect(find.text('இன்று எடுத்துச் செல்வது'), findsOneWidget);
+    expect(find.text('இன்று வெளியே செல்வது'), findsOneWidget);
+    expect(find.text('இன்று திரும்புவது'), findsOneWidget);
   });
 
   test('light and dark themes carry the plum style', () {
