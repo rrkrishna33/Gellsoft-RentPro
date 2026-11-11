@@ -1,4 +1,4 @@
-import java.util.Properties
+﻿import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -17,7 +17,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.gellsoft.gellsoft_rentpro"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37 // the notification plugin needs 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
