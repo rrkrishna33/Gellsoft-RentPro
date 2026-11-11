@@ -56,6 +56,7 @@ void main() {
       'return_date': ms(ret),
       'status': status,
       'rent_total': rent,
+      'payable': rent - discount,
       'discount': discount,
       'created_at': created ?? ms(0),
     });

@@ -6,7 +6,12 @@ import '../../core/restart_widget.dart';
 import '../../data/app_settings.dart';
 import '../../data/business_profile.dart';
 import '../../l10n/strings.dart';
+import '../../data/notifications.dart';
+import '../../subscription/entitlement.dart';
+import '../../subscription/plan.dart';
+import '../../subscription/pro_prompt.dart';
 import '../onboarding/onboarding_screen.dart';
+import 'billing_settings_screen.dart';
 
 /// Shop details, language, theme and the app version.
 class SettingsScreen extends ConsumerWidget {
@@ -18,6 +23,14 @@ class SettingsScreen extends ConsumerWidget {
     final settings = ref.watch(appSettingsProvider).valueOrNull;
     final language = AppLanguage.fromCode(settings?.language);
     final mode = settings?.themeMode ?? ThemeMode.system;
+    final isPro = ref.watch(isProProvider);
+    final notify = ref.watch(notifySettingsProvider).valueOrNull ?? const NotifySettings();
+
+    Future<void> change(NotifySettings next) async {
+      await ref.read(notifySettingsProvider.notifier).setSettings(next);
+      if (next.daily || next.beforeEvent) await NotificationService.askPermission();
+      await syncNotifications(ref);
+    }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
@@ -88,6 +101,78 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.percent_rounded),
+            title: Text(tr('Billing and GST')),
+            subtitle: Text(
+              profile?.gstEnabled ?? false
+                  ? tr('GST is on')
+                  : tr('GST is off'),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const BillingSettingsScreen(),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: isPro
+              ? Column(
+                  children: [
+                    SwitchListTile(
+                      secondary: const Icon(Icons.wb_sunny_outlined),
+                      title: Text(tr('Morning summary')),
+                      subtitle: Text(tr('What to send, collect and bring back today')),
+                      value: notify.daily,
+                      onChanged: (v) => change(notify.copyWith(daily: v)),
+                    ),
+                    const Divider(),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.event_available_outlined),
+                      title: Text(tr('Reminder before each event')),
+                      subtitle: Text(
+                        tr('Set on every booking: how many days before'),
+                      ),
+                      value: notify.beforeEvent,
+                      onChanged: (v) => change(notify.copyWith(beforeEvent: v)),
+                    ),
+                    const Divider(),
+                    ListTile(
+                      leading: const Icon(Icons.schedule),
+                      title: Text(tr('Reminder time')),
+                      trailing: Text(
+                        notify.time.format(context),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      onTap: () async {
+                        final t = await showTimePicker(
+                          context: context,
+                          initialTime: notify.time,
+                        );
+                        if (t != null) {
+                          await change(
+                            notify.copyWith(hour: t.hour, minute: t.minute),
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                )
+              : ListTile(
+                  leading: const Icon(Icons.notifications_active_outlined),
+                  title: Text(tr('Reminder notifications')),
+                  subtitle: Text(
+                    tr('A morning summary and a reminder before each event. Part of Pro.'),
+                  ),
+                  trailing: const Icon(Icons.lock_outline),
+                  onTap: () => showProPrompt(context, ProFeature.notifications),
+                ),
         ),
         const SizedBox(height: 12),
         Card(

@@ -181,8 +181,8 @@ void main() {
   });
 
   test('light and dark themes carry the plum style', () {
-    expect(AppTheme.light().extension<RentStyle>(), isNotNull);
-    expect(AppTheme.dark().extension<RentStyle>(), isNotNull);
+    expect(AppTheme.light().extension<AuroraStyle>(), isNotNull);
+    expect(AppTheme.dark().extension<AuroraStyle>(), isNotNull);
     expect(AppTheme.light().colorScheme.primary, Palette.primary);
     expect(AppTheme.dark().colorScheme.primary, Palette.darkPrimary);
   });

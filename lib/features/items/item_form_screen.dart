@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/constants.dart';
 import '../../data/business_profile.dart';
 import '../../data/models.dart';
 import '../../data/repositories.dart';
@@ -30,6 +31,10 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
     text: widget.item == null ? '' : amountText(widget.item!.deposit),
   );
   late final _notes = TextEditingController(text: widget.item?.notes);
+  late final _hsn = TextEditingController(text: widget.item?.hsn);
+  late double _gst = widget.item?.gstRate ??
+      ref.read(profileProvider).valueOrNull?.defaultGstRate ??
+      18;
   late RateType _rateType = widget.item?.rateType ?? RateType.event;
   late ItemStatus _status = widget.item?.status ?? ItemStatus.active;
   List<String> _used = const [];
@@ -45,7 +50,7 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
 
   @override
   void dispose() {
-    for (final c in [_name, _category, _size, _rate, _deposit, _notes]) {
+    for (final c in [_name, _category, _size, _rate, _deposit, _notes, _hsn]) {
       c.dispose();
     }
     super.dispose();
@@ -75,6 +80,8 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
       rateType: _rateType,
       rate: parseAmount(_rate.text),
       deposit: parseAmount(_deposit.text),
+      hsn: _hsn.text,
+      gstRate: _gst,
       notes: _notes.text,
       status: _status,
       createdAt: old?.createdAt ?? DateTime.now(),
@@ -183,6 +190,36 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
                 ),
               ],
             ),
+            if (ref.watch(profileProvider).valueOrNull?.gstEnabled ?? false) ...[
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<double>(
+                      initialValue: gstSlabs.contains(_gst) ? _gst : 18,
+                      isExpanded: true,
+                      decoration: InputDecoration(labelText: tr('GST rate')),
+                      items: [
+                        for (final r in gstSlabs)
+                          DropdownMenuItem(value: r, child: Text('${amountText(r)}%')),
+                      ],
+                      onChanged: (r) => setState(() => _gst = r ?? _gst),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _hsn,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: tr('SAC / HSN code'),
+                        hintText: '9973',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (editing) ...[
               const SizedBox(height: 14),
               DropdownButtonFormField<ItemStatus>(

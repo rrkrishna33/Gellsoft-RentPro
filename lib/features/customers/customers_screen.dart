@@ -103,7 +103,7 @@ class _CustomerTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surface,
         borderRadius: BorderRadius.circular(18),
-        boxShadow: RentStyle.of(context).softShadow,
+        boxShadow: AuroraStyle.of(context).softShadow,
       ),
       child: Material(
         type: MaterialType.transparency,

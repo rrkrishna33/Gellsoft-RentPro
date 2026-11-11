@@ -54,7 +54,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     final text = Theme.of(context).textTheme;
     return Scaffold(
       appBar: editing ? AppBar(title: Text(tr('Shop details'))) : null,
-      body: RentBackground(
+      body: AuroraBackground(
         child: SafeArea(
           child: Form(
             key: _form,

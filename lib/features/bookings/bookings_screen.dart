@@ -133,7 +133,7 @@ class BookingTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
-        boxShadow: RentStyle.of(context).softShadow,
+        boxShadow: AuroraStyle.of(context).softShadow,
       ),
       child: Material(
         type: MaterialType.transparency,

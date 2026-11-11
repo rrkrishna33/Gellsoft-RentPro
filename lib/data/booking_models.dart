@@ -66,8 +66,15 @@ class BookingLine {
   final double rate;
   final double deposit;
 
-  /// What this item came to for the booked days.
+  /// What this item came to for the booked days, before discount and tax.
   final double amount;
+  final String hsn;
+  final double gstRate;
+
+  /// After this item's share of the discount; GST is on top of this unless
+  /// the rates include it.
+  final double taxable;
+  final double tax;
 
   const BookingLine({
     required this.itemId,
@@ -76,7 +83,14 @@ class BookingLine {
     required this.rate,
     required this.deposit,
     required this.amount,
-  });
+    this.hsn = '',
+    this.gstRate = 0,
+    double? taxable,
+    this.tax = 0,
+  }) : taxable = taxable ?? amount;
+
+  /// What the customer pays for this item.
+  double get total => ((taxable + tax) * 100).roundToDouble() / 100;
 }
 
 class Payment {
@@ -134,6 +148,13 @@ class Booking {
   final double rentTotal;
   final double depositTotal;
   final double discount;
+
+  /// GST on the whole booking (inside the total when rates include GST).
+  final double taxTotal;
+
+  /// What the customer pays for the rent: the lines, less the discount, with
+  /// GST. Deposit is not part of it.
+  final double payable;
   final String notes;
 
   /// Days before the event to remind the owner to send the items.
@@ -158,18 +179,20 @@ class Booking {
     required this.depositTotal,
     required this.discount,
     required this.notes,
+    this.taxTotal = 0,
+    double? payable,
     required this.remindDays,
     required this.createdAt,
     this.lines = const [],
     this.payments = const [],
     this.photos = const [],
-  });
+  }) : payable = payable ?? rentTotal - discount;
 
   double _sum(bool Function(Payment) test) =>
       payments.where(test).fold(0.0, (a, p) => a + p.amount);
 
-  /// Rent after the discount.
-  double get rentNet => rentTotal - discount;
+  /// What the customer owes for the rent (after discount, with GST).
+  double get rentNet => payable;
 
   /// Rent paid so far (advance and balance).
   double get rentPaid => _sum((p) => p.kind.isRent);

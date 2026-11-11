@@ -43,6 +43,12 @@ class RentItem {
   final RateType rateType;
   final double rate;
   final double deposit;
+
+  /// SAC/HSN code printed on the invoice (rental of goods is 9973).
+  final String hsn;
+
+  /// GST rate in percent charged on this item's rent.
+  final double gstRate;
   final String notes;
   final ItemStatus status;
   final DateTime createdAt;
@@ -56,6 +62,8 @@ class RentItem {
     this.rateType = RateType.event,
     this.rate = 0,
     this.deposit = 0,
+    this.hsn = '',
+    this.gstRate = 0,
     this.notes = '',
     this.status = ItemStatus.active,
     required this.createdAt,
@@ -68,6 +76,8 @@ class RentItem {
     RateType? rateType,
     double? rate,
     double? deposit,
+    String? hsn,
+    double? gstRate,
     String? notes,
     ItemStatus? status,
   }) => RentItem(
@@ -79,6 +89,8 @@ class RentItem {
     rateType: rateType ?? this.rateType,
     rate: rate ?? this.rate,
     deposit: deposit ?? this.deposit,
+    hsn: hsn ?? this.hsn,
+    gstRate: gstRate ?? this.gstRate,
     notes: notes ?? this.notes,
     status: status ?? this.status,
     createdAt: createdAt,
@@ -93,6 +105,8 @@ class RentItem {
     rateType: RateType.fromName(r['rate_type'] as String?),
     rate: (r['rate'] as num?)?.toDouble() ?? 0,
     deposit: (r['deposit'] as num?)?.toDouble() ?? 0,
+    hsn: (r['hsn'] as String?) ?? '',
+    gstRate: (r['gst_rate'] as num?)?.toDouble() ?? 0,
     notes: (r['notes'] as String?) ?? '',
     status: ItemStatus.fromName(r['status'] as String?),
     createdAt: DateTime.fromMillisecondsSinceEpoch(r['created_at'] as int),
@@ -107,6 +121,13 @@ class Customer {
   final String phone;
   final String address;
 
+  /// The customer's GSTIN, when they have one (for a B2B invoice).
+  final String gstin;
+
+  /// Two-digit GST state code of where the customer is. Empty = same state
+  /// as the shop.
+  final String stateCode;
+
   /// A note about the ID the customer showed (for example "Aadhaar ending
   /// 1234"). The app never stores the ID itself.
   final String idNote;
@@ -119,6 +140,8 @@ class Customer {
     required this.name,
     this.phone = '',
     this.address = '',
+    this.gstin = '',
+    this.stateCode = '',
     this.idNote = '',
     this.notes = '',
     required this.createdAt,
@@ -128,6 +151,8 @@ class Customer {
     String? name,
     String? phone,
     String? address,
+    String? gstin,
+    String? stateCode,
     String? idNote,
     String? notes,
   }) => Customer(
@@ -136,6 +161,8 @@ class Customer {
     name: name ?? this.name,
     phone: phone ?? this.phone,
     address: address ?? this.address,
+    gstin: gstin ?? this.gstin,
+    stateCode: stateCode ?? this.stateCode,
     idNote: idNote ?? this.idNote,
     notes: notes ?? this.notes,
     createdAt: createdAt,
@@ -147,6 +174,8 @@ class Customer {
     name: r['name'] as String,
     phone: (r['phone'] as String?) ?? '',
     address: (r['address'] as String?) ?? '',
+    gstin: (r['gstin'] as String?) ?? '',
+    stateCode: (r['state_code'] as String?) ?? '',
     idNote: (r['id_note'] as String?) ?? '',
     notes: (r['notes'] as String?) ?? '',
     createdAt: DateTime.fromMillisecondsSinceEpoch(r['created_at'] as int),

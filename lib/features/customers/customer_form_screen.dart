@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/constants.dart';
+import '../../core/gst.dart';
+import '../../data/business_profile.dart';
 import '../../data/models.dart';
 import '../../data/repositories.dart';
 import '../../l10n/strings.dart';
@@ -22,13 +25,15 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
   late final _name = TextEditingController(text: widget.customer?.name);
   late final _phone = TextEditingController(text: widget.customer?.phone);
   late final _address = TextEditingController(text: widget.customer?.address);
+  late final _gstin = TextEditingController(text: widget.customer?.gstin);
+  late String _state = widget.customer?.stateCode ?? '';
   late final _idNote = TextEditingController(text: widget.customer?.idNote);
   late final _notes = TextEditingController(text: widget.customer?.notes);
   bool _saving = false;
 
   @override
   void dispose() {
-    for (final c in [_name, _phone, _address, _idNote, _notes]) {
+    for (final c in [_name, _phone, _address, _gstin, _idNote, _notes]) {
       c.dispose();
     }
     super.dispose();
@@ -76,6 +81,8 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
         name: _name.text,
         phone: _phone.text,
         address: _address.text,
+        gstin: _gstin.text,
+        stateCode: _state,
         idNote: _idNote.text,
         notes: _notes.text,
         createdAt: old?.createdAt ?? DateTime.now(),
@@ -136,6 +143,39 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(labelText: tr('Address')),
             ),
+            if (ref.watch(profileProvider).valueOrNull?.gstEnabled ?? false) ...[
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _gstin,
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  labelText: tr('Customer GSTIN (optional)'),
+                  helperText: tr('Only for a business customer'),
+                ),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty || isValidGstin(v.trim()))
+                    ? null
+                    : tr('This GSTIN does not look right'),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                initialValue: indianStates.containsKey(_state) ? _state : '',
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: tr('State of the customer'),
+                  helperText: tr('Leave empty for the same state as your shop'),
+                ),
+                items: [
+                  DropdownMenuItem(value: '', child: Text(tr('Same as my shop'))),
+                  for (final e in indianStates.entries)
+                    DropdownMenuItem(
+                      value: e.key,
+                      child: Text('${e.key} - ${e.value}', overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _state = v ?? ''),
+              ),
+            ],
             const SizedBox(height: 14),
             TextFormField(
               controller: _idNote,

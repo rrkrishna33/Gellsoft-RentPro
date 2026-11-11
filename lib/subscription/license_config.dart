@@ -2,7 +2,9 @@
 /// The license public key is added when the server learns about RentPro.
 library;
 
-const licenseServerUrl = 'https://playstore.gellsoft.com';
+/// RentPro's own copy of the license server (same code as BillPro's, with its
+/// own settings, key and database), behind the same address.
+const licenseServerUrl = 'https://playstore.gellsoft.com/rentpro';
 
 /// Licenses made for any other app are refused.
 const licenseAudience = 'com.gellsoft.gellsoft_rentpro';

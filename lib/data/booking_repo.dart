@@ -8,6 +8,7 @@ import '../subscription/plan.dart';
 import 'booking_models.dart';
 import 'database.dart';
 import 'models.dart';
+import 'reminders.dart';
 
 /// Why a booking could not be saved or changed.
 enum BookingError {
@@ -107,6 +108,21 @@ enum BookingFilter {
   };
 }
 
+class _Prepared {
+  const _Prepared({
+    required this.lines,
+    required this.rent,
+    required this.deposit,
+    required this.tax,
+    required this.payable,
+  });
+  final List<Map<String, Object?>> lines;
+  final double rent;
+  final double deposit;
+  final double tax;
+  final double payable;
+}
+
 class BookingRepo {
   /// Bookings with the given [filter], newest work first. [query] matches the
   /// customer's name or phone, or the booking number.
@@ -135,6 +151,24 @@ class BookingRepo {
       WHERE $where
       ORDER BY b.pickup_date ${upward ? 'ASC' : 'DESC'}, b.id DESC
     ''', args);
+    return _hydrate(d, rows);
+  }
+
+  /// The bookings the reminders look at: everything booked or out, plus
+  /// returned bookings that still have rent to collect.
+  Future<List<Booking>> forReminders() async {
+    final d = await AppDatabase.instance.db;
+    final rows = await d.rawQuery('''
+      SELECT b.*, c.name AS c_name, c.phone AS c_phone
+      FROM bookings b JOIN customers c ON c.id = b.customer_id
+      WHERE b.deleted = 0 AND (
+        b.status IN ('booked', 'picked_up')
+        OR (b.status = 'returned' AND b.payable - COALESCE((
+              SELECT SUM(p.amount) FROM payments p
+              WHERE p.booking_id = b.id AND p.kind IN ('advance', 'balance')), 0) > 0.005)
+      )
+      ORDER BY b.pickup_date, b.id
+    ''');
     return _hydrate(d, rows);
   }
 
@@ -196,6 +230,8 @@ class BookingRepo {
           rentTotal: (r['rent_total'] as num).toDouble(),
           depositTotal: (r['deposit_total'] as num).toDouble(),
           discount: (r['discount'] as num).toDouble(),
+          taxTotal: (r['tax_total'] as num).toDouble(),
+          payable: (r['payable'] as num).toDouble(),
           notes: (r['notes'] as String?) ?? '',
           remindDays: (r['remind_days'] as int?) ?? 2,
           createdAt: DateTime.fromMillisecondsSinceEpoch(
@@ -211,6 +247,10 @@ class BookingRepo {
               rate: (l['rate'] as num).toDouble(),
               deposit: (l['deposit'] as num).toDouble(),
               amount: (l['amount'] as num).toDouble(),
+              hsn: (l['hsn'] as String?) ?? '',
+              gstRate: (l['gst_rate'] as num).toDouble(),
+              taxable: (l['taxable'] as num).toDouble(),
+              tax: (l['tax'] as num).toDouble(),
             ),
           ),
           payments: pick(
@@ -337,6 +377,7 @@ class BookingRepo {
     required bool isPro,
     double advance = 0,
     PayMode advanceMode = PayMode.cash,
+    GstConfig gst = GstConfig.off,
     DateTime? now,
   }) async {
     final d = await AppDatabase.instance.db;
@@ -345,10 +386,8 @@ class BookingRepo {
       if (!isPro && await _createdInMonth(txn, at) >= FreePlan.bookingsPerMonth) {
         throw const BookingException(BookingError.limitReached);
       }
-      final lines = await _checkedLines(txn, draft, null, at);
-      final rent = lines.fold(0.0, (a, l) => a + (l['amount']! as double));
-      _checkDiscount(draft.discount, rent);
-      if (advance < 0 || advance > rent - draft.discount + 0.005) {
+      final p = await _prepare(txn, draft, null, at, gst);
+      if (advance < 0 || advance > p.payable + 0.005) {
         throw const BookingException(BookingError.badAmount);
       }
       final number =
@@ -356,7 +395,6 @@ class BookingRepo {
                   as int? ??
               0) +
           1;
-      final deposit = lines.fold(0.0, (a, l) => a + (l['deposit']! as double));
       final ms = at.millisecondsSinceEpoch;
       final id = await txn.insert('bookings', {
         'uuid': newUuid(),
@@ -367,14 +405,16 @@ class BookingRepo {
         'pickup_date': dayOf(draft.pickupDate).millisecondsSinceEpoch,
         'return_date': dayOf(draft.returnDate).millisecondsSinceEpoch,
         'status': BookingStatus.booked.db,
-        'rent_total': rent,
-        'deposit_total': deposit,
+        'rent_total': p.rent,
+        'deposit_total': p.deposit,
         'discount': draft.discount,
+        'tax_total': p.tax,
+        'payable': p.payable,
         'notes': draft.notes.trim(),
         'remind_days': draft.remindDays,
         'created_at': ms,
       });
-      await _insertLines(txn, id, lines);
+      await _insertLines(txn, id, p.lines);
       if (advance > 0.004) {
         await txn.insert('payments', {
           'booking_id': id,
@@ -391,7 +431,12 @@ class BookingRepo {
 
   /// Changes a booking that has not been returned or cancelled. The items,
   /// dates and discount are checked again; payments are left as they are.
-  Future<void> update(int id, BookingDraft draft, {DateTime? now}) async {
+  Future<void> update(
+    int id,
+    BookingDraft draft, {
+    GstConfig gst = GstConfig.off,
+    DateTime? now,
+  }) async {
     final d = await AppDatabase.instance.db;
     final at = now ?? DateTime.now();
     await d.transaction((txn) async {
@@ -399,10 +444,7 @@ class BookingRepo {
       if (!cur.holdsItems) {
         throw const BookingException(BookingError.badState);
       }
-      final lines = await _checkedLines(txn, draft, id, at);
-      final rent = lines.fold(0.0, (a, l) => a + (l['amount']! as double));
-      _checkDiscount(draft.discount, rent);
-      final deposit = lines.fold(0.0, (a, l) => a + (l['deposit']! as double));
+      final p = await _prepare(txn, draft, id, at, gst);
       await txn.update(
         'bookings',
         {
@@ -410,9 +452,11 @@ class BookingRepo {
           'event_date': dayOf(draft.eventDate).millisecondsSinceEpoch,
           'pickup_date': dayOf(draft.pickupDate).millisecondsSinceEpoch,
           'return_date': dayOf(draft.returnDate).millisecondsSinceEpoch,
-          'rent_total': rent,
-          'deposit_total': deposit,
+          'rent_total': p.rent,
+          'deposit_total': p.deposit,
           'discount': draft.discount,
+          'tax_total': p.tax,
+          'payable': p.payable,
           'notes': draft.notes.trim(),
           'remind_days': draft.remindDays,
           'updated_at': at.millisecondsSinceEpoch,
@@ -421,7 +465,7 @@ class BookingRepo {
         whereArgs: [id],
       );
       await txn.delete('booking_items', where: 'booking_id = ?', whereArgs: [id]);
-      await _insertLines(txn, id, lines);
+      await _insertLines(txn, id, p.lines);
     });
   }
 
@@ -442,12 +486,14 @@ class BookingRepo {
     return BookingStatus.fromDb(r.first['status'] as String?);
   }
 
-  /// Checks the dates and items of [draft] and works out each line.
-  Future<List<Map<String, Object?>>> _checkedLines(
+  /// Checks the dates, items and discount of [draft] and works out each line
+  /// and the totals.
+  Future<_Prepared> _prepare(
     DatabaseExecutor d,
     BookingDraft draft,
     int? exceptBookingId,
     DateTime now,
+    GstConfig gst,
   ) async {
     final pickup = dayOf(draft.pickupDate);
     final event = dayOf(draft.eventDate);
@@ -464,7 +510,9 @@ class BookingRepo {
       ids,
     );
     final byId = {for (final r in rows) r['id'] as int: r};
-    final lines = <Map<String, Object?>>[];
+    final amounts = <double>[];
+    final rates = <double>[];
+    final base = <Map<String, Object?>>[];
     for (final id in ids) {
       final r = byId[id];
       if (r == null ||
@@ -477,15 +525,35 @@ class BookingRepo {
       }
       final type = RateType.fromName(r['rate_type'] as String?);
       final rate = (r['rate'] as num).toDouble();
-      lines.add({
+      amounts.add(lineAmount(type, rate, pickup, ret));
+      rates.add((r['gst_rate'] as num?)?.toDouble() ?? 0);
+      base.add({
         'item_id': id,
         'name': r['name'],
         'rate_type': type.name,
         'rate': rate,
         'deposit': (r['deposit'] as num).toDouble(),
-        'amount': lineAmount(type, rate, pickup, ret),
+        'hsn': (r['hsn'] as String?) ?? '',
       });
     }
+    final rent = r2(amounts.fold(0.0, (a, b) => a + b));
+    _checkDiscount(draft.discount, rent);
+    final money = splitMoney(
+      amounts: amounts,
+      gstRates: rates,
+      discount: draft.discount,
+      gst: gst,
+    );
+    final lines = <Map<String, Object?>>[
+      for (var i = 0; i < base.length; i++)
+        {
+          ...base[i],
+          'amount': amounts[i],
+          'gst_rate': gst.enabled ? rates[i] : 0.0,
+          'taxable': money[i].taxable,
+          'tax': money[i].tax,
+        },
+    ];
     final clash = await _conflicts(d, ids, pickup, ret, exceptBookingId, now);
     if (clash.isNotEmpty) {
       final first = clash.values.first;
@@ -494,7 +562,13 @@ class BookingRepo {
         byId[first.itemId]!['name'] as String,
       );
     }
-    return lines;
+    return _Prepared(
+      lines: lines,
+      rent: rent,
+      deposit: r2(base.fold(0.0, (a, l) => a + (l['deposit']! as double))),
+      tax: r2(money.fold(0.0, (a, m) => a + m.tax)),
+      payable: r2(money.fold(0.0, (a, m) => a + m.total)),
+    );
   }
 
   Future<void> _insertLines(
@@ -640,6 +714,14 @@ final bookingsProvider = FutureProvider.autoDispose<List<Booking>>((ref) {
 });
 
 /// One booking with its lines, payments and photos.
+/// What needs doing today (see [buildReminders]).
+final remindersProvider = FutureProvider.autoDispose<List<ReminderItem>>((
+  ref,
+) async {
+  final all = await ref.watch(bookingRepoProvider).forReminders();
+  return buildReminders(all, DateTime.now());
+});
+
 final bookingProvider = FutureProvider.autoDispose.family<Booking?, int>(
   (ref, id) => ref.watch(bookingRepoProvider).get(id),
 );

@@ -119,10 +119,30 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
     if (mounted) setState(() => _clash = clash);
   }
 
-  double get _rent => _chosen.values.fold(
-    0.0,
-    (a, i) => a + lineAmount(i.rateType, i.rate, _pickup, _return),
+  GstConfig get _gst =>
+      ref.read(profileProvider).valueOrNull?.gst ?? GstConfig.off;
+
+  /// Each chosen item's money for the dates shown, with discount and GST.
+  List<LineMoney> get _lines {
+    final list = _chosen.values.toList();
+    return splitMoney(
+      amounts: [
+        for (final i in list) lineAmount(i.rateType, i.rate, _pickup, _return),
+      ],
+      gstRates: [for (final i in list) i.gstRate],
+      discount: _disc > 0 && _disc <= _rent ? _disc : 0,
+      gst: _gst,
+    );
+  }
+
+  double get _rent => r2(
+    _chosen.values.fold(
+      0.0,
+      (a, i) => a + lineAmount(i.rateType, i.rate, _pickup, _return),
+    ),
   );
+  double get _tax => r2(_lines.fold(0.0, (a, l) => a + l.tax));
+  double get _payable => r2(_lines.fold(0.0, (a, l) => a + l.total));
   double get _deposit => _chosen.values.fold(0.0, (a, i) => a + i.deposit);
   double get _disc => parseAmount(_discount.text);
   double get _adv => parseAmount(_advance.text);
@@ -225,13 +245,14 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
       final int id;
       if (_editing) {
         id = widget.booking!.id;
-        await repo.update(id, draft);
+        await repo.update(id, draft, gst: _gst);
       } else {
         id = await repo.create(
           draft,
           isPro: ref.read(isProProvider),
           advance: _adv,
           advanceMode: _mode,
+          gst: _gst,
         );
       }
       if (mounted) Navigator.of(context).pop(id);
@@ -250,8 +271,7 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final net = _rent - _disc;
-    final balance = net - _adv;
+    final balance = _payable - _adv;
 
     Widget section(String title, List<Widget> children) => Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -284,7 +304,7 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
       appBar: AppBar(
         title: Text(_editing ? tr('Edit booking') : tr('New booking')),
       ),
-      body: RentBackground(
+      body: AuroraBackground(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -397,6 +417,16 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
                         labelText: tr('Discount (₹)'),
                       ),
                     ),
+                    if (_gst.enabled) ...[
+                      const SizedBox(height: 10),
+                      _line(
+                        context,
+                        _gst.inclusive ? tr('GST (included)') : tr('GST'),
+                        money(_tax),
+                      ),
+                      const SizedBox(height: 6),
+                      _line(context, tr('Total'), money(_payable), bold: true),
+                    ],
                     if (!_editing) ...[
                       const SizedBox(height: 10),
                       Row(

@@ -1,14 +1,24 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
+import '../../core/share.dart';
 import '../../core/theme.dart';
 import '../../data/booking_models.dart';
 import '../../data/booking_repo.dart';
+import '../../data/business_profile.dart';
+import '../../data/invoice_repo.dart';
+import '../../data/reminders.dart';
 import '../../l10n/strings.dart';
 import '../common/widgets.dart';
+import '../invoices/invoice_detail_screen.dart';
+import '../invoices/invoice_pdf.dart';
 import 'booking_errors.dart';
 import 'booking_form_screen.dart';
+import 'booking_photos.dart';
+import 'messages.dart';
 
 /// One booking: who, when, what, the money, and the buttons that move it on.
 class BookingDetailScreen extends ConsumerWidget {
@@ -37,6 +47,8 @@ class BookingDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(bookingProvider(bookingId));
     final repo = ref.read(bookingRepoProvider);
+    final shop = ref.watch(profileProvider).valueOrNull;
+    final invoice = ref.watch(bookingInvoiceProvider(bookingId)).valueOrNull;
 
     return async.when(
       loading: () =>
@@ -56,6 +68,63 @@ class BookingDetailScreen extends ConsumerWidget {
           );
         }
         final active = b.status.holdsItems;
+
+        Future<void> whatsApp(String message) async {
+          final ok = await sendWhatsApp(b.customerPhone, message);
+          if (!ok && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  tr('Could not open WhatsApp. Check the customer phone number.'),
+                ),
+              ),
+            );
+          }
+        }
+
+        Future<void> makeInvoice() async {
+          if (shop == null) return;
+          await _run(context, ref, () async {
+            final id = await ref
+                .read(invoiceRepoProvider)
+                .createForBooking(
+                  b.id,
+                  shopStateCode: shop.stateCode,
+                  prefix: shop.invoicePrefix,
+                  gstEnabled: shop.gstEnabled,
+                  taxInclusive: shop.taxInclusive,
+                );
+            ref.invalidate(bookingInvoiceProvider(b.id));
+            ref.invalidate(invoicesProvider);
+            if (context.mounted) {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => InvoiceDetailScreen(invoiceId: id),
+                ),
+              );
+              ref.invalidate(bookingProvider(b.id));
+            }
+          });
+        }
+
+        Future<void> receipt(Payment p, {required bool send}) async {
+          if (shop == null) return;
+          if (send) {
+            await whatsApp(receiptMessage(p, b, shop));
+          } else {
+            final bytes = await buildReceiptPdf(shop: shop, booking: b, payment: p);
+            await sharePdf(bytes, 'receipt-${p.id}.pdf');
+          }
+        }
+
+        ReminderKind? remindKind() => switch (b.status) {
+          BookingStatus.booked => ReminderKind.sendItems,
+          BookingStatus.pickedUp =>
+            b.isOverdue(dayOf(DateTime.now()))
+                ? ReminderKind.overdue
+                : ReminderKind.returnDue,
+          _ => null,
+        };
 
         Future<void> take(PaymentKind kind) async {
           final p = await showDialog<_PaymentInput>(
@@ -150,7 +219,7 @@ class BookingDetailScreen extends ConsumerWidget {
                 ),
             ],
           ),
-          body: RentBackground(
+          body: AuroraBackground(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: [
@@ -173,6 +242,8 @@ class BookingDetailScreen extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
+                PhotosSection(booking: b),
+                const SizedBox(height: 16),
                 _Card(
                   title: tr('Money'),
                   children: [
@@ -187,6 +258,9 @@ class BookingDetailScreen extends ConsumerWidget {
                               tr('Discount'),
                               '- ${money(b.discount)}',
                             ),
+                          if (b.taxTotal > 0)
+                            _row(context, tr('GST'), money(b.taxTotal)),
+                          _row(context, tr('Total'), money(b.payable), bold: true),
                           _row(context, tr('Paid'), money(b.rentPaid)),
                           const Divider(height: 20),
                           _row(
@@ -231,6 +305,76 @@ class BookingDetailScreen extends ConsumerWidget {
                       ),
                   ],
                 ),
+                if (b.status != BookingStatus.cancelled) ...[
+                  const SizedBox(height: 16),
+                  _Card(
+                    title: tr('Invoice'),
+                    children: [
+                      if (invoice != null)
+                        ListTile(
+                          leading: const Icon(Icons.receipt_long_outlined),
+                          title: Text(invoice.label),
+                          subtitle: Text(
+                            '${invoice.isTaxInvoice ? tr('Tax invoice') : tr('Rental bill')} · ${money(invoice.total)}',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  InvoiceDetailScreen(invoiceId: invoice.id),
+                            ),
+                          ),
+                        )
+                      else
+                        _action(
+                          Icons.receipt_long_outlined,
+                          shop?.gstEnabled ?? false
+                              ? tr('Create tax invoice')
+                              : tr('Create bill'),
+                          makeInvoice,
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 16),
+                _Card(
+                  title: tr('Message the customer'),
+                  children: [
+                    _action(
+                      Icons.chat_outlined,
+                      tr('Send booking details on WhatsApp'),
+                      () => shop == null
+                          ? null
+                          : whatsApp(confirmationMessage(b, shop)),
+                    ),
+                    if (remindKind() != null && shop != null)
+                      _action(
+                        Icons.notifications_active_outlined,
+                        switch (remindKind()!) {
+                          ReminderKind.sendItems => tr('Remind to collect the items'),
+                          ReminderKind.overdue => tr('Remind: items are overdue'),
+                          _ => tr('Remind to return the items'),
+                        },
+                        () => whatsApp(reminderMessage(remindKind()!, b, shop)),
+                      ),
+                    if (b.balanceDue > 0 &&
+                        b.status != BookingStatus.cancelled &&
+                        shop != null)
+                      _action(
+                        Icons.payments_outlined,
+                        tr('Remind about the balance'),
+                        () => whatsApp(
+                          reminderMessage(ReminderKind.balance, b, shop),
+                        ),
+                      ),
+                    if (b.customerPhone.isNotEmpty)
+                      _action(
+                        Icons.call_outlined,
+                        tr('Call {name}', {'name': b.customerName}),
+                        () => callPhone(b.customerPhone),
+                      ),
+                  ],
+                ),
                 if (b.payments.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   _Card(
@@ -248,10 +392,33 @@ class BookingDetailScreen extends ConsumerWidget {
                               if (p.note.isNotEmpty) p.note,
                             ].join(' · '),
                           ),
-                          trailing: Text(
-                            (p.kind == PaymentKind.refund ? '- ' : '') +
-                                money(p.amount),
-                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                (p.kind == PaymentKind.refund ? '- ' : '') +
+                                    money(p.amount),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              PopupMenuButton<String>(
+                                tooltip: tr('Receipt'),
+                                icon: const Icon(Icons.receipt_outlined),
+                                onSelected: (v) =>
+                                    receipt(p, send: v == 'whatsapp'),
+                                itemBuilder: (_) => [
+                                  PopupMenuItem(
+                                    value: 'pdf',
+                                    child: Text(tr('Share receipt PDF')),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'whatsapp',
+                                    child: Text(tr('Send receipt on WhatsApp')),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
                     ],
@@ -293,8 +460,15 @@ class BookingDetailScreen extends ConsumerWidget {
     );
   }
 
-  static Widget _action(IconData icon, String label, VoidCallback onTap) =>
-      ListTile(leading: Icon(icon), title: Text(label), onTap: onTap);
+  static Widget _action(
+    IconData icon,
+    String label,
+    FutureOr<void> Function() onTap,
+  ) => ListTile(
+    leading: Icon(icon),
+    title: Text(label),
+    onTap: () => onTap(),
+  );
 
   static Widget _row(
     BuildContext context,
@@ -350,7 +524,7 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final b = booking;
-    final style = RentStyle.of(context);
+    final style = AuroraStyle.of(context);
     final text = Theme.of(context).textTheme;
     final overdue = b.isOverdue(dayOf(DateTime.now()));
     Widget date(String label, DateTime d) => Expanded(

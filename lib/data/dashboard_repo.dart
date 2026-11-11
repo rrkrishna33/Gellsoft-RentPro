@@ -48,7 +48,7 @@ class DashboardRepo {
     }
 
     final due = await d.rawQuery('''
-      SELECT COALESCE(SUM(b.rent_total - b.discount - COALESCE((
+      SELECT COALESCE(SUM(b.payable - COALESCE((
         SELECT SUM(p.amount) FROM payments p
         WHERE p.booking_id = b.id AND p.kind IN ('advance', 'balance')), 0)), 0)
         AS due
