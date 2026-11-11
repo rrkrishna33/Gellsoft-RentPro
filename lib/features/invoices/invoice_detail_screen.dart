@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
 import '../../core/share.dart';
+import '../../core/whatsapp_pdf.dart';
 import '../../core/theme.dart';
 import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
@@ -20,27 +23,45 @@ class InvoiceDetailScreen extends ConsumerWidget {
   const InvoiceDetailScreen({super.key, required this.invoiceId});
   final int invoiceId;
 
-  Future<void> _pdf(
-    BuildContext context,
-    WidgetRef ref,
-    Invoice inv, {
-    required bool print,
-  }) async {
-    final shop = ref.read(profileProvider).valueOrNull;
-    if (shop == null) return;
+  Future<Uint8List> _bytes(WidgetRef ref, Invoice inv) async {
+    final shop = ref.read(profileProvider).valueOrNull!;
     final booking = await ref.read(bookingRepoProvider).get(inv.bookingId);
-    final bytes = await buildInvoicePdf(
+    return buildInvoicePdf(
       shop: shop,
       invoice: inv,
       payments: booking?.payments ?? const [],
       depositTotal: booking?.depositTotal ?? 0,
       depositHeld: booking?.depositHeld ?? 0,
     );
+  }
+
+  Future<void> _pdf(
+    BuildContext context,
+    WidgetRef ref,
+    Invoice inv, {
+    required bool print,
+  }) async {
+    if (ref.read(profileProvider).valueOrNull == null) return;
+    final bytes = await _bytes(ref, inv);
     if (print) {
       await printPdf(bytes, inv.label);
     } else {
       await sharePdf(bytes, '${inv.label}.pdf');
     }
+  }
+
+  /// WhatsApp opens with the invoice PDF attached and the message written;
+  /// without WhatsApp the share sheet opens with the same PDF.
+  Future<void> _whatsApp(BuildContext context, WidgetRef ref, Invoice inv) async {
+    final shop = ref.read(profileProvider).valueOrNull;
+    if (shop == null) return;
+    final bytes = await _bytes(ref, inv);
+    await sendPdfOnWhatsApp(
+      bytes: bytes,
+      fileName: '${inv.label}.pdf',
+      phone: inv.customerPhone,
+      message: invoiceMessage(inv, shop),
+    );
   }
 
   @override
@@ -249,23 +270,7 @@ class InvoiceDetailScreen extends ConsumerWidget {
                       child: OutlinedButton.icon(
                         onPressed: shop == null
                             ? null
-                            : () async {
-                                final ok = await sendWhatsApp(
-                                  inv.customerPhone,
-                                  invoiceMessage(inv, shop),
-                                );
-                                if (!ok && context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        tr(
-                                          'Could not open WhatsApp. Check the customer phone number.',
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                }
-                              },
+                            : () => _whatsApp(context, ref, inv),
                         icon: const Icon(Icons.chat_outlined),
                         label: const Text('WhatsApp'),
                       ),

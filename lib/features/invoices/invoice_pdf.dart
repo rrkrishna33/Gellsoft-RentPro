@@ -19,11 +19,11 @@ String _m(double v) => _num.format(v);
 String _q(double v) =>
     v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
 
-const _accent = PdfColor.fromInt(0xFF6B2D8C);
+const _accent = PdfColor.fromInt(0xFF1C2C54);
 const _ink = PdfColor.fromInt(0xFF1F2937);
 const _soft = PdfColor.fromInt(0xFF6B7280);
-const _zebra = PdfColor.fromInt(0xFFF5EEFA);
-const _line = PdfColor.fromInt(0xFFD9CCE3);
+const _zebra = PdfColor.fromInt(0xFFF8F2DF);
+const _line = PdfColor.fromInt(0xFFE2D6B0);
 
 String _stateName(String code) {
   final n = indianStates[code];

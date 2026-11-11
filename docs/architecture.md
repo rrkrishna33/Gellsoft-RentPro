@@ -1,6 +1,6 @@
-# GellSoft RentPro: how it is built
+﻿# GellSoft RentPro: how it is built
 
-Flutter (Android only), Riverpod, SQLite (sqflite). The look and the subscription code are shared in spirit with GellSoft BillPro: the same design language (Aurora theme, floating bar, soft cards) in plum, and the same license client, with RentPro's own server copy.
+Flutter (Android only), Riverpod, SQLite (sqflite). The look and the subscription code are shared in spirit with GellSoft BillPro: the same design language (Aurora theme, floating bar, soft cards) in midnight navy and gold, and the same license client, with RentPro's own server copy.
 
 ## Folders
 - `lib/core`: theme, formats, GST and booking maths (`booking_math.dart`, `gst.dart`), sharing and WhatsApp links (`share.dart`), PDF fonts.

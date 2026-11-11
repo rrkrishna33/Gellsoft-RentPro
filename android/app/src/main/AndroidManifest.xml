@@ -37,6 +37,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Hands one PDF at a time to WhatsApp (only the cache/shared folder). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
         <!-- Lets scheduled reminders fire again after the phone restarts. -->
         <receiver android:exported="false"
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
@@ -65,6 +75,9 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Sending a PDF straight to WhatsApp or WhatsApp Business. -->
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
         <!-- WhatsApp messages and phone calls to customers. -->
         <intent>
             <action android:name="android.intent.action.VIEW"/>

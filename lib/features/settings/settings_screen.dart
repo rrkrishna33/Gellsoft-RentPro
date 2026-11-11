@@ -25,7 +25,7 @@ class SettingsScreen extends ConsumerWidget {
     final profile = ref.watch(profileProvider).valueOrNull;
     final settings = ref.watch(appSettingsProvider).valueOrNull;
     final language = AppLanguage.fromCode(settings?.language);
-    final mode = settings?.themeMode ?? ThemeMode.system;
+    final mode = settings?.themeMode ?? ThemeMode.dark;
     final isPro = ref.watch(isProProvider);
     final notify = ref.watch(notifySettingsProvider).valueOrNull ?? const NotifySettings();
 

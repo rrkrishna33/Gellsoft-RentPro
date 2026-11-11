@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
 import '../../core/share.dart';
+import '../../core/whatsapp_pdf.dart';
 import '../../core/theme.dart';
 import '../../data/booking_models.dart';
 import '../../data/booking_repo.dart';
@@ -109,10 +110,15 @@ class BookingDetailScreen extends ConsumerWidget {
 
         Future<void> receipt(Payment p, {required bool send}) async {
           if (shop == null) return;
+          final bytes = await buildReceiptPdf(shop: shop, booking: b, payment: p);
           if (send) {
-            await whatsApp(receiptMessage(p, b, shop));
+            await sendPdfOnWhatsApp(
+              bytes: bytes,
+              fileName: 'receipt-${p.id}.pdf',
+              phone: b.customerPhone,
+              message: receiptMessage(p, b, shop),
+            );
           } else {
-            final bytes = await buildReceiptPdf(shop: shop, booking: b, payment: p);
             await sharePdf(bytes, 'receipt-${p.id}.pdf');
           }
         }

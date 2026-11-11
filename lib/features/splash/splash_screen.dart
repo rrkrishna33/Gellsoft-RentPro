@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants.dart';
-import '../../core/theme.dart';
 
 /// Startup page: logo, app name and a small progress indicator.
 class SplashScreen extends StatelessWidget {
@@ -29,7 +28,7 @@ class SplashScreen extends StatelessWidget {
               AppInfo.appName,
               style: text.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
-                color: Palette.primary,
+                color: const Color(0xFF1C2C54),
               ),
             ),
             const SizedBox(height: 32),

@@ -2,44 +2,48 @@ import 'package:flutter/material.dart';
 
 /// Every colour in the app comes from here, so the look can be retuned in
 /// one place.
+///
+/// RentPro is "Midnight and Gold": deep navy with gold. The dark theme is the
+/// full midnight look; the light theme keeps the same gold and navy on warm
+/// ivory.
 class Palette {
-  // Light
-  static const primary = Color(0xFF6B2D8C); // deep teal
+  // Light: navy and gold on ivory
+  static const primary = Color(0xFF1C2C54); // midnight navy
   static const onPrimary = Colors.white;
-  static const primaryContainer = Color(0xFFEBDDF5);
-  static const onPrimaryContainer = Color(0xFF2E0F43);
-  static const background = Color(0xFFF8F4FB); // cool page with a hint of teal
+  static const primaryContainer = Color(0xFFF6E9C3); // soft gold
+  static const onPrimaryContainer = Color(0xFF3B2C05);
+  static const background = Color(0xFFFBF7EC); // warm ivory
   static const surface = Colors.white;
-  static const ink = Color(0xFF111827); // main text
-  static const inkSoft = Color(0xFF5B6472); // secondary text
-  static const outline = Color(0xFFD3C6DD); // input borders
-  static const hairline = Color(0xFFE6DCEE); // card borders, dividers
+  static const ink = Color(0xFF14213D); // main text
+  static const inkSoft = Color(0xFF5E6579); // secondary text
+  static const outline = Color(0xFFD9CDA8); // input borders
+  static const hairline = Color(0xFFEBE2C8); // card borders, dividers
   static const success = Color(0xFF2E7D4F);
   static const danger = Color(0xFFB3261E);
   static const warning = Color(0xFFB7791F);
-  static const accent = Color(0xFFC98A1B); // warm gold, for highlights
+  static const accent = Color(0xFFD5A64A); // gold, for highlights
 
-  // Dark
-  static const darkPrimary = Color(0xFFD9B8F0);
-  static const darkOnPrimary = Color(0xFF2E0F43);
-  static const darkBackground = Color(0xFF140F1A);
-  static const darkSurface = Color(0xFF1D1625);
-  static const darkHairline = Color(0xFF33283F);
-  static const darkInk = Color(0xFFEDE6F3);
-  static const darkInkSoft = Color(0xFFA99DB5);
+  // Dark: midnight and gold
+  static const darkPrimary = Color(0xFFE8C26A); // gold
+  static const darkOnPrimary = Color(0xFF1A1405);
+  static const darkBackground = Color(0xFF0C1426);
+  static const darkSurface = Color(0xFF131D36);
+  static const darkHairline = Color(0xFF27334F);
+  static const darkInk = Color(0xFFEEF2F9);
+  static const darkInkSoft = Color(0xFF93A0B8);
 }
 
-/// Colours for the colourful tiles and shortcuts (Home and Quick Bill). Each
-/// product / shortcut keeps its own colour, so staff learn items by colour.
+/// Colours for the colourful shortcut tiles on Home: gold first, then colours
+/// that sit well on navy and on ivory.
 const tileColors = <Color>[
-  Color(0xFF6B2D8C), // teal
-  Color(0xFFF2682F), // orange
-  Color(0xFF2F6BDD), // blue
-  Color(0xFFE0457B), // pink
-  Color(0xFF7C4DDB), // violet
-  Color(0xFF17A673), // mint
-  Color(0xFFB7791F), // amber
-  Color(0xFF3A4A5A), // slate
+  Color(0xFFD5A64A), // gold
+  Color(0xFF4F7BD9), // blue
+  Color(0xFF3FB68B), // green
+  Color(0xFFD9577A), // rose
+  Color(0xFF8A6BD9), // violet
+  Color(0xFFE08A3C), // amber
+  Color(0xFFB9743B), // copper
+  Color(0xFF5C6F8F), // slate
 ];
 
 /// The richer "Aurora" look: gradient hero cards and buttons, soft shadows and
@@ -77,32 +81,35 @@ class AuroraStyle extends ThemeExtension<AuroraStyle> {
   /// The rounded bill panel in Quick Bill.
   final Color sheet;
 
+  static const _navy = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF1C2C54), Color(0xFF16264A), Color(0xFF22345F)],
+  );
+  static const _gold = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFFF1D58A), Color(0xFFD5A64A)],
+  );
+
   static const light = AuroraStyle(
-    page: [Color(0xFFF0E6F7), Color(0xFFFAF7FC)],
-    hero: LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFF3F1259), Color(0xFF6B2D8C), Color(0xFFA24FC2)],
-    ),
-    cta: LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFF5A2278), Color(0xFF8E3FB5)],
-    ),
-    onCta: Colors.white,
+    page: [Color(0xFFF6EBC8), Color(0xFFFDFBF4)],
+    hero: _navy,
+    cta: _gold,
+    onCta: Color(0xFF1A1405),
     softShadow: [
-      BoxShadow(color: Color(0x176B2D8C), blurRadius: 18, offset: Offset(0, 6)),
+      BoxShadow(color: Color(0x1F8A6B1B), blurRadius: 18, offset: Offset(0, 6)),
     ],
     heroShadow: [
       BoxShadow(
-        color: Color(0x526B2D8C),
+        color: Color(0x4D16264A),
         blurRadius: 30,
         offset: Offset(0, 14),
       ),
     ],
     ctaShadow: [
       BoxShadow(
-        color: Color(0x4D6B2D8C),
+        color: Color(0x4DD5A64A),
         blurRadius: 20,
         offset: Offset(0, 10),
       ),
@@ -111,32 +118,24 @@ class AuroraStyle extends ThemeExtension<AuroraStyle> {
   );
 
   static const dark = AuroraStyle(
-    page: [Color(0xFF1E1228), Color(0xFF120D18)],
-    hero: LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFF2B0E3E), Color(0xFF4F2069), Color(0xFF7A3A9A)],
-    ),
-    cta: LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFFC79BE6), Color(0xFFD9B8F0)],
-    ),
-    onCta: Color(0xFF2E0F43),
+    page: [Color(0xFF16213F), Color(0xFF0A1122)],
+    hero: _navy,
+    cta: _gold,
+    onCta: Color(0xFF1A1405),
     softShadow: [
       BoxShadow(color: Color(0x59000000), blurRadius: 18, offset: Offset(0, 6)),
     ],
     heroShadow: [
       BoxShadow(
-        color: Color(0x66000000),
+        color: Color(0x73000000),
         blurRadius: 30,
         offset: Offset(0, 14),
       ),
     ],
     ctaShadow: [
-      BoxShadow(color: Color(0x4DC79BE6), blurRadius: 20, offset: Offset(0, 8)),
+      BoxShadow(color: Color(0x4DD5A64A), blurRadius: 20, offset: Offset(0, 8)),
     ],
-    sheet: Color(0xFF1D1625),
+    sheet: Color(0xFF131D36),
   );
 
   /// The theme's style, or the one for its brightness when a test or an
@@ -189,7 +188,7 @@ class AppTheme {
           onPrimary: Palette.onPrimary,
           primaryContainer: Palette.primaryContainer,
           onPrimaryContainer: Palette.onPrimaryContainer,
-          secondary: const Color(0xFF475569),
+          secondary: Palette.accent,
           tertiary: Palette.success,
           surface: Palette.surface,
           onSurface: Palette.ink,
@@ -198,10 +197,10 @@ class AppTheme {
           outlineVariant: Palette.hairline,
           error: Palette.danger,
           surfaceContainerLowest: Palette.surface,
-          surfaceContainerLow: const Color(0xFFF8F9FB),
-          surfaceContainer: const Color(0xFFF1F3F7),
-          surfaceContainerHigh: const Color(0xFFEBEEF3),
-          surfaceContainerHighest: const Color(0xFFE5E9EF),
+          surfaceContainerLow: const Color(0xFFFAF6E8),
+          surfaceContainer: const Color(0xFFF4EEDA),
+          surfaceContainerHigh: const Color(0xFFEEE7CF),
+          surfaceContainerHighest: const Color(0xFFE8E0C4),
         );
     return _build(scheme, Palette.background);
   }
@@ -214,18 +213,19 @@ class AppTheme {
         ).copyWith(
           primary: Palette.darkPrimary,
           onPrimary: Palette.darkOnPrimary,
-          primaryContainer: const Color(0xFF4A2461),
-          onPrimaryContainer: const Color(0xFFF1DDFB),
+          primaryContainer: const Color(0xFF3B3117),
+          onPrimaryContainer: const Color(0xFFF6E4B0),
+          secondary: Palette.accent,
           surface: Palette.darkSurface,
           onSurface: Palette.darkInk,
           onSurfaceVariant: Palette.darkInkSoft,
-          outline: const Color(0xFF4A3B59),
+          outline: const Color(0xFF34425F),
           outlineVariant: Palette.darkHairline,
           surfaceContainerLowest: Palette.darkBackground,
-          surfaceContainerLow: const Color(0xFF19121F),
-          surfaceContainer: const Color(0xFF221929),
-          surfaceContainerHigh: const Color(0xFF2A2033),
-          surfaceContainerHighest: const Color(0xFF33283F),
+          surfaceContainerLow: const Color(0xFF101A30),
+          surfaceContainer: const Color(0xFF16213B),
+          surfaceContainerHigh: const Color(0xFF1C2847),
+          surfaceContainerHighest: const Color(0xFF243253),
         );
     return _build(scheme, Palette.darkBackground);
   }
@@ -310,7 +310,7 @@ class AppTheme {
         color: s.surface,
         surfaceTintColor: Colors.transparent,
         elevation: dark ? 0 : 2,
-        shadowColor: dark ? Colors.transparent : const Color(0x336B2D8C),
+        shadowColor: dark ? Colors.transparent : const Color(0x338A6B1B),
         margin: const EdgeInsets.symmetric(vertical: 4),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(_radius),

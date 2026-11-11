@@ -4,13 +4,68 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.SystemClock
 import android.provider.Settings
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // Sends a PDF on WhatsApp: the file is read through a FileProvider (only
+        // the cache/shared folder is ever shared), WhatsApp opens on the
+        // customer's chat when a number is given, and the person presses send.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gellsoft/share")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "sendPdf" -> {
+                        try {
+                            val path = call.argument<String>("path")
+                                ?: throw IllegalArgumentException("no file")
+                            val number = call.argument<String>("number")
+                            val text = call.argument<String>("text") ?: ""
+                            val uri = FileProvider.getUriForFile(
+                                this,
+                                "$packageName.fileprovider",
+                                File(path),
+                            )
+                            fun build(pkg: String?, withChat: Boolean): Intent =
+                                Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/pdf"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    putExtra(Intent.EXTRA_TEXT, text)
+                                    if (withChat && number != null) {
+                                        putExtra("jid", "$number@s.whatsapp.net")
+                                    }
+                                    if (pkg != null) setPackage(pkg)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                            var how = "chooser"
+                            // WhatsApp, then WhatsApp Business
+                            for (pkg in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+                                try {
+                                    startActivity(build(pkg, true))
+                                    how = "whatsapp"
+                                    break
+                                } catch (e: ActivityNotFoundException) {
+                                    // not installed: try the next one
+                                }
+                            }
+                            if (how == "chooser") {
+                                val chooser = Intent.createChooser(build(null, false), null)
+                                chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                startActivity(chooser)
+                            }
+                            result.success(how)
+                        } catch (e: Exception) {
+                            result.error("send_failed", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
 
         // Facts about the phone that the user cannot change by setting the date:
         // used to notice a changed clock (the monthly booking limit and the trial

@@ -10,6 +10,7 @@ import 'package:gellsoft_rentpro/core/format.dart';
 import 'package:gellsoft_rentpro/core/pdf_text.dart';
 import 'package:gellsoft_rentpro/core/share.dart' as share;
 import 'package:gellsoft_rentpro/core/theme.dart';
+import 'package:gellsoft_rentpro/core/whatsapp_pdf.dart' as wa;
 import 'package:gellsoft_rentpro/data/booking_models.dart';
 import 'package:gellsoft_rentpro/data/booking_repo.dart';
 import 'package:gellsoft_rentpro/data/business_profile.dart';
@@ -113,6 +114,7 @@ void main() {
   late Directory photoDir;
   final opened = <Uri>[];
   final sharedPdfs = <String>[];
+  final onWhatsApp = <({String file, String phone, String message, int size})>[];
   final phone = _Phone();
 
   setUpAll(() {
@@ -135,6 +137,17 @@ void main() {
       PdfTextKit.resetForTests();
       opened.clear();
       sharedPdfs.clear();
+      onWhatsApp.clear();
+      wa.pdfWhatsAppSender = ({
+        required Uint8List bytes,
+        required String fileName,
+        required String phone,
+        required String message,
+      }) async {
+        expect(String.fromCharCodes(bytes.sublist(0, 5)), '%PDF-');
+        onWhatsApp.add((file: fileName, phone: phone, message: message, size: bytes.length));
+        return wa.PdfSendResult.whatsapp;
+      };
       phone.scheduled.clear();
       phone.cancels = 0;
       phone.permissionAsked = 0;
@@ -184,6 +197,7 @@ void main() {
         Lang.current = AppLanguage.en;
         share.linkOpener = null;
         share.pdfSharer = null;
+        wa.pdfWhatsAppSender = null;
         PhotoStore.picker = null;
         PhotoStore.folderOverride = null;
         await t.runAsync(() => AppDatabase.instance.close());
@@ -256,11 +270,14 @@ void main() {
     expect(sharedPdfs, ['RNT-0001.pdf']);
 
     await t.tap(find.text('WhatsApp'));
-    await settle(t);
-    expect(opened.single.host, 'wa.me');
-    expect(opened.single.path, '/919876543210');
-    expect(opened.single.queryParameters['text'], contains('RNT-0001'));
-    expect(opened.single.queryParameters['text'], contains('tax invoice'));
+    await until(t, () => onWhatsApp.isNotEmpty);
+    // WhatsApp gets the invoice PDF itself, the customer's number and the message
+    expect(onWhatsApp.single.file, 'RNT-0001.pdf');
+    expect(onWhatsApp.single.phone, '98765 43210');
+    expect(onWhatsApp.single.message, contains('RNT-0001'));
+    expect(onWhatsApp.single.message, contains('tax invoice'));
+    expect(onWhatsApp.single.size, greaterThan(1500));
+    expect(opened, isEmpty, reason: 'no plain text link is opened as well');
 
     // back on the booking the invoice is linked, and it is in the list
     await t.pageBack();
@@ -331,8 +348,11 @@ void main() {
     await t.tap(find.byTooltip('Receipt'));
     await settle(t);
     await t.tap(find.text('Send receipt on WhatsApp'));
-    await settle(t);
-    expect(opened.last.queryParameters['text'], contains('received ₹400.00'));
+    await until(t, () => onWhatsApp.isNotEmpty);
+    expect(onWhatsApp.single.file, startsWith('receipt-'));
+    expect(onWhatsApp.single.message, contains('received ₹400.00'));
+    expect(opened, isEmpty);
+    await settle(t); // let the menu finish closing
 
     await t.tap(find.text('Send booking details on WhatsApp'));
     await settle(t);
@@ -350,7 +370,7 @@ void main() {
     await t.tap(find.text('Call Anu'));
     await settle(t);
     expect(opened.last.scheme, 'tel');
-    expect(opened.length, 5);
+    expect(opened.length, 4, reason: 'details, two reminders and the call');
   });
 
   testDb('a customer with no phone: WhatsApp says so and opens nothing', (t) async {

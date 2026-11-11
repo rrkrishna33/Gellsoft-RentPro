@@ -66,7 +66,7 @@ class _GellsoftRentProAppState extends ConsumerState<GellsoftRentProApp>
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
-      themeMode: settings?.themeMode ?? ThemeMode.system,
+      themeMode: settings?.themeMode ?? ThemeMode.dark,
       locale: Locale(language.code),
       supportedLocales: [for (final l in AppLanguage.values) Locale(l.code)],
       localizationsDelegates: const [

@@ -7,7 +7,7 @@ class AppSettings {
   final String language; // en | ta
   final ThemeMode themeMode;
 
-  const AppSettings({this.language = 'en', this.themeMode = ThemeMode.system});
+  const AppSettings({this.language = 'en', this.themeMode = ThemeMode.dark});
 
   AppSettings copyWith({String? language, ThemeMode? themeMode}) => AppSettings(
     language: language ?? this.language,
@@ -20,7 +20,7 @@ class AppSettings {
       language: sp.getString('s_lang') ?? 'en',
       themeMode: ThemeMode.values.firstWhere(
         (m) => m.name == sp.getString('s_theme'),
-        orElse: () => ThemeMode.system,
+        orElse: () => ThemeMode.dark,
       ),
     );
   }

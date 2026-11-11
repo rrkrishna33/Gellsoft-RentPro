@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only folder whose files this app hands to other apps (a PDF being sent
+     on WhatsApp). Nothing else of the app's storage is shared. -->
+<paths>
+    <cache-path name="shared" path="shared/" />
+</paths>

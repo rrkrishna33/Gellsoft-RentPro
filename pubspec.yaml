@@ -1,7 +1,7 @@
 ﻿name: gellsoft_rentpro
 description: GellSoft RentPro - bookings and rent management for rental shops.
 publish_to: "none"
-version: 0.1.0+4
+version: 0.1.0+5
 
 environment:
   sdk: ^3.13.7

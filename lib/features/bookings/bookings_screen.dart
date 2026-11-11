@@ -163,10 +163,10 @@ class BookingTile extends StatelessWidget {
                       StatusChip(
                         label: b.status.label,
                         color: switch (b.status) {
-                          BookingStatus.booked => Palette.primary,
+                          BookingStatus.booked => Theme.of(context).colorScheme.primary,
                           BookingStatus.pickedUp => Palette.warning,
                           BookingStatus.returned => Palette.success,
-                          BookingStatus.cancelled => Palette.inkSoft,
+                          BookingStatus.cancelled => Theme.of(context).colorScheme.onSurfaceVariant,
                         },
                       ),
                   ],

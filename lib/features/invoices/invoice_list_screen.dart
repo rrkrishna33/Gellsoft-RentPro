@@ -127,7 +127,10 @@ class _InvoiceTile extends StatelessWidget {
                       ),
                     ),
                     if (i.cancelled)
-                      StatusChip(label: tr('Cancelled'), color: Palette.inkSoft)
+                      StatusChip(
+                        label: tr('Cancelled'),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      )
                     else if (i.due > 0)
                       Text(
                         tr('Due {amount}', {'amount': money(i.due)}),

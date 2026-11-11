@@ -67,7 +67,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     tr('Welcome to {app}', {'app': AppInfo.appName}),
                     style: text.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w800,
-                      color: Palette.primary,
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                   const SizedBox(height: 6),
