@@ -120,7 +120,13 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       body: Form(
         key: _form,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          // room under the last button for the phone's own bar
+          padding: EdgeInsets.fromLTRB(
+            16,
+            16,
+            16,
+            16 + MediaQuery.paddingOf(context).bottom,
+          ),
           children: [
             TextFormField(
               controller: _name,

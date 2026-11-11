@@ -515,4 +515,5 @@ const taStrings = <String, String>{
   'Saves items, customers, bookings, payments, photos and settings to one file. Pick a folder or Google Drive in the next screen.': 'பொருட்கள், வாடிக்கையாளர்கள், முன்பதிவுகள், பணம், படங்கள் மற்றும் அமைப்புகளை ஒரே கோப்பில் சேமிக்கிறது. அடுத்த திரையில் கோப்புறை அல்லது Google Drive-ஐத் தேர்ந்தெடுக்கவும்.',
   'This replaces ALL current data on this phone (items, customers, bookings, photos and settings). This cannot be undone.': 'இந்தத் தொலைபேசியில் உள்ள அனைத்துத் தரவையும் (பொருட்கள், வாடிக்கையாளர்கள், முன்பதிவுகள், படங்கள் மற்றும் அமைப்புகள்) இது மாற்றிவிடும். இதைத் திரும்பப் பெற முடியாது.',
   'Use this on a new phone or after reinstalling. It replaces all data currently in the app.': 'புதிய தொலைபேசியில் அல்லது மீண்டும் நிறுவிய பின் இதைப் பயன்படுத்தவும். செயலியில் தற்போதுள்ள அனைத்துத் தரவையும் இது மாற்றிவிடும்.',
+  'Could not save the booking: {e}': 'முன்பதிவைச் சேமிக்க முடியவில்லை: {e}',
 };

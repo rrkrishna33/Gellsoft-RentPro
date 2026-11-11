@@ -178,7 +178,7 @@ void main() {
     );
     await t.tap(find.text('Save booking'));
     await settle(t);
-    expect(find.text('Choose the customer.'), findsOneWidget);
+    expect(find.text('Choose the customer.'), findsWidgets);
 
     await t.scrollUntilVisible(
       find.text('Choose the customer'),

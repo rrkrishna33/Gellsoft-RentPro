@@ -221,9 +221,28 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
     _recheck();
   }
 
+  /// Shows why the booking was not saved: on the page, and in a message at
+  /// the bottom that cannot be missed.
+  void _fail(String message) {
+    if (!mounted) return;
+    setState(() {
+      _saving = false;
+      _error = message;
+    });
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _save() async {
+    if (_saving) return;
+    FocusScope.of(context).unfocus();
     if (_customer == null) {
-      setState(() => _error = tr('Choose the customer.'));
+      _fail(tr('Choose the customer.'));
+      return;
+    }
+    if (_chosen.isEmpty) {
+      _fail(tr('Choose at least one item.'));
       return;
     }
     setState(() {
@@ -258,12 +277,16 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
       if (mounted) Navigator.of(context).pop(id);
     } on BookingException catch (e) {
       if (!mounted) return;
-      setState(() => _saving = false);
       if (e.error == BookingError.limitReached) {
+        setState(() => _saving = false);
         await showProPrompt(context, ProFeature.unlimitedBookings);
       } else {
-        setState(() => _error = bookingErrorText(e));
+        _fail(bookingErrorText(e));
       }
+    } catch (e) {
+      // anything unexpected (a database problem, for example): say so, and
+      // let the person try again instead of leaving a dead button
+      _fail(tr('Could not save the booking: {e}', {'e': e}));
     }
   }
 
@@ -306,7 +329,13 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
       ),
       body: AuroraBackground(
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          // room under the last button for the phone's own bar
+          padding: EdgeInsets.fromLTRB(
+            16,
+            16,
+            16,
+            16 + MediaQuery.paddingOf(context).bottom,
+          ),
           children: [
             if (_freeLeft != null)
               Container(
@@ -531,7 +560,13 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
               ),
             FilledButton(
               onPressed: _saving ? null : _save,
-              child: Text(_editing ? tr('Save changes') : tr('Save booking')),
+              child: _saving
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    )
+                  : Text(_editing ? tr('Save changes') : tr('Save booking')),
             ),
             const SizedBox(height: 24),
           ],
