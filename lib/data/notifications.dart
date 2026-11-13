@@ -22,7 +22,11 @@ class NotifySettings {
     this.beforeEvent = true,
     this.hour = 8,
     this.minute = 0,
+    this.extraTimes = const [],
   });
+
+  /// The most reminder times a day.
+  static const maxTimes = 4;
 
   /// A summary each morning of what needs doing that day.
   final bool daily;
@@ -33,18 +37,49 @@ class NotifySettings {
   final int hour;
   final int minute;
 
+  /// More times of day for the same reminders, as minutes after midnight, so
+  /// the shop can be told more than once a day.
+  final List<int> extraTimes;
+
   TimeOfDay get time => TimeOfDay(hour: hour, minute: minute);
+
+  /// Every reminder time, as minutes after midnight, earliest first, with no
+  /// time twice and at most [maxTimes].
+  List<int> get times {
+    final all = <int>{hour * 60 + minute, ...extraTimes}.toList()..sort();
+    return all.length > maxTimes ? all.sublist(0, maxTimes) : all;
+  }
+
+  List<TimeOfDay> get timesOfDay => [
+    for (final m in times) TimeOfDay(hour: m ~/ 60, minute: m % 60),
+  ];
+
+  /// The same settings with [minutes] (minutes after midnight) as the times.
+  NotifySettings withTimes(List<int> minutes) {
+    final all = <int>{...minutes}.toList()..sort();
+    if (all.isEmpty) return this;
+    final kept = all.length > maxTimes ? all.sublist(0, maxTimes) : all;
+    return NotifySettings(
+      daily: daily,
+      beforeEvent: beforeEvent,
+      hour: kept.first ~/ 60,
+      minute: kept.first % 60,
+      extraTimes: kept.sublist(1),
+    );
+  }
 
   NotifySettings copyWith({
     bool? daily,
     bool? beforeEvent,
     int? hour,
     int? minute,
+    List<int>? extraTimes,
   }) => NotifySettings(
     daily: daily ?? this.daily,
     beforeEvent: beforeEvent ?? this.beforeEvent,
     hour: hour ?? this.hour,
     minute: minute ?? this.minute,
+    extraTimes: extraTimes ?? this.extraTimes,
   );
 
   static Future<NotifySettings> load() async {
@@ -54,6 +89,10 @@ class NotifySettings {
       beforeEvent: sp.getBool('n_before') ?? true,
       hour: sp.getInt('n_hour') ?? 8,
       minute: sp.getInt('n_minute') ?? 0,
+      extraTimes: [
+        for (final s in sp.getStringList('n_extra') ?? const <String>[])
+          if (int.tryParse(s) case final m? when m >= 0 && m < 1440) m,
+      ],
     );
   }
 
@@ -63,6 +102,7 @@ class NotifySettings {
     await sp.setBool('n_before', beforeEvent);
     await sp.setInt('n_hour', hour);
     await sp.setInt('n_minute', minute);
+    await sp.setStringList('n_extra', [for (final m in extraTimes) '$m']);
   }
 }
 
@@ -119,14 +159,13 @@ List<PlannedNotification> planNotifications({
   String titled(String t) => label.isEmpty ? t : '$label: $t';
   final out = <PlannedNotification>[];
   final today = dayOf(now);
-  DateTime at(DateTime d) =>
-      DateTime(d.year, d.month, d.day, settings.hour, settings.minute);
+  final times = settings.times;
+  DateTime at(DateTime d, int minutes) =>
+      DateTime(d.year, d.month, d.day, minutes ~/ 60, minutes % 60);
 
   if (settings.daily) {
     for (var i = 0; i < days; i++) {
       final date = DateTime(today.year, today.month, today.day + i);
-      final when = at(date);
-      if (!when.isAfter(now)) continue;
       final items = buildReminders(bookings, date);
       if (items.isEmpty) continue;
       int n(ReminderKind k) => items.where((r) => r.kind == k).length;
@@ -140,14 +179,18 @@ List<PlannedNotification> planNotifications({
         if (n(ReminderKind.balance) > 0)
           tr('{n} with money due', {'n': n(ReminderKind.balance)}),
       ];
-      out.add(
-        PlannedNotification(
-          idOffset + 1000 + i,
-          when,
-          titled(tr('{n} things need you today', {'n': items.length})),
-          parts.join(', '),
-        ),
-      );
+      for (var t = 0; t < times.length; t++) {
+        final when = at(date, times[t]);
+        if (!when.isAfter(now)) continue;
+        out.add(
+          PlannedNotification(
+            idOffset + 1000 + i * 10 + t,
+            when,
+            titled(tr('{n} things need you today', {'n': items.length})),
+            parts.join(', '),
+          ),
+        );
+      }
     }
   }
 
@@ -155,12 +198,16 @@ List<PlannedNotification> planNotifications({
     for (final b in bookings) {
       final names = b.lines.map((l) => l.label).join(', ');
       if (b.status == BookingStatus.booked) {
-        final when = at(b.eventDate.subtract(Duration(days: b.remindDays)));
-        if (when.isAfter(now) &&
-            !dayOf(when).isAfter(today.add(Duration(days: days)))) {
+        final remindDay = b.eventDate.subtract(Duration(days: b.remindDays));
+        for (var t = 0; t < times.length; t++) {
+          final when = at(remindDay, times[t]);
+          if (!when.isAfter(now) ||
+              dayOf(when).isAfter(today.add(Duration(days: days)))) {
+            continue;
+          }
           out.add(
             PlannedNotification(
-              idOffset + 100000 + b.id * 2,
+              idOffset + 100000 + b.id * 20 + t,
               when,
               titled(
                 service
@@ -188,12 +235,15 @@ List<PlannedNotification> planNotifications({
       if (!service &&
           (b.status == BookingStatus.booked ||
               b.status == BookingStatus.pickedUp)) {
-        final when = at(b.returnDate);
-        if (when.isAfter(now) &&
-            !dayOf(when).isAfter(today.add(Duration(days: days)))) {
+        for (var t = 0; t < times.length; t++) {
+          final when = at(b.returnDate, times[t]);
+          if (!when.isAfter(now) ||
+              dayOf(when).isAfter(today.add(Duration(days: days)))) {
+            continue;
+          }
           out.add(
             PlannedNotification(
-              idOffset + 100000 + b.id * 2 + 1,
+              idOffset + 100000 + b.id * 20 + 10 + t,
               when,
               titled(tr('Items due back today: #{n}', {'n': b.number})),
               tr('{items} from {name}', {
@@ -340,6 +390,21 @@ class NotificationService {
 
   /// Ask for permission (Android 13 and later show a prompt).
   static Future<bool> askPermission() => backend.requestPermission();
+}
+
+/// The first time the app opens, asks to show notifications (Android 13 and
+/// later show a prompt). It asks only once: a person who said no is not asked
+/// again at every start, and can turn it on in the phone's settings.
+Future<void> askNotificationPermissionOnFirstOpen() async {
+  try {
+    final sp = await SharedPreferences.getInstance();
+    if (sp.getBool('s_notifask') ?? false) return;
+    // marked first, so a prompt that is closed, or a crash, never repeats it
+    await sp.setBool('s_notifask', true);
+    await NotificationService.askPermission();
+  } catch (_) {
+    // the app works without notifications; never get in its way
+  }
 }
 
 /// Brings the phone's reminders up to date: call it when the app opens and

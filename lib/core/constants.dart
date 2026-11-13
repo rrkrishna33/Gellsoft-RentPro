@@ -8,7 +8,7 @@ class AppInfo {
   static const currencySymbol = '₹';
 
   /// Keep in step with `version:` in pubspec.yaml (without the build number).
-  static const version = '0.1.0';
+  static const version = '0.2.0';
 }
 
 /// What the shop does. It picks the categories offered when adding an item

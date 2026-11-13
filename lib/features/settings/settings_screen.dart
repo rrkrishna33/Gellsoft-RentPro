@@ -222,25 +222,73 @@ class SettingsScreen extends ConsumerWidget {
                       onChanged: (v) => change(notify.copyWith(beforeEvent: v)),
                     ),
                     const Divider(),
-                    ListTile(
-                      leading: const Icon(Icons.schedule),
-                      title: Text(tr('Reminder time')),
-                      trailing: Text(
-                        notify.time.format(context),
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      onTap: () async {
-                        final t = await showTimePicker(
-                          context: context,
-                          initialTime: notify.time,
-                        );
-                        if (t != null) {
-                          await change(
-                            notify.copyWith(hour: t.hour, minute: t.minute),
+                    for (final (i, m) in notify.times.indexed)
+                      ListTile(
+                        leading: const Icon(Icons.schedule),
+                        title: Text(
+                          i == 0 ? tr('Reminder time') : tr('Another reminder'),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              TimeOfDay(hour: m ~/ 60, minute: m % 60)
+                                  .format(context),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (notify.times.length > 1)
+                              IconButton(
+                                tooltip: tr('Remove'),
+                                icon: const Icon(Icons.close, size: 18),
+                                onPressed: () => change(
+                                  notify.withTimes([
+                                    for (final x in notify.times)
+                                      if (x != m) x,
+                                  ]),
+                                ),
+                              ),
+                          ],
+                        ),
+                        onTap: () async {
+                          final t = await showTimePicker(
+                            context: context,
+                            initialTime: TimeOfDay(hour: m ~/ 60, minute: m % 60),
                           );
-                        }
-                      },
-                    ),
+                          if (t == null) return;
+                          await change(
+                            notify.withTimes([
+                              for (final x in notify.times)
+                                if (x != m) x,
+                              t.hour * 60 + t.minute,
+                            ]),
+                          );
+                        },
+                      ),
+                    if (notify.times.length < NotifySettings.maxTimes)
+                      ListTile(
+                        leading: const Icon(Icons.add_alarm),
+                        title: Text(tr('Add a reminder time')),
+                        subtitle: Text(
+                          tr('Be reminded more than once a day, up to {n} times', {
+                            'n': NotifySettings.maxTimes,
+                          }),
+                        ),
+                        onTap: () async {
+                          final t = await showTimePicker(
+                            context: context,
+                            initialTime: const TimeOfDay(hour: 18, minute: 0),
+                          );
+                          if (t == null) return;
+                          await change(
+                            notify.withTimes([
+                              ...notify.times,
+                              t.hour * 60 + t.minute,
+                            ]),
+                          );
+                        },
+                      ),
                   ],
                 )
               : ListTile(

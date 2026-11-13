@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gellsoft_rentpro/core/constants.dart';
 import 'package:gellsoft_rentpro/data/booking_models.dart';
@@ -6,8 +8,10 @@ import 'package:gellsoft_rentpro/data/business_profile.dart';
 import 'package:gellsoft_rentpro/data/invoice_models.dart';
 import 'package:gellsoft_rentpro/data/models.dart';
 import 'package:gellsoft_rentpro/data/notifications.dart';
+import 'package:gellsoft_rentpro/data/photo_store.dart';
 import 'package:gellsoft_rentpro/features/invoices/invoice_pdf.dart';
 import 'package:gellsoft_rentpro/l10n/strings.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gellsoft_rentpro/subscription/plan.dart';
 
 DateTime day(int d) => DateTime(2027, 3, d);
@@ -86,6 +90,17 @@ class _Recorder implements NotificationBackend {
     calls.add('schedule');
     scheduled.add(n);
   }
+}
+
+class _Throwing implements NotificationBackend {
+  @override
+  Future<void> init() async {}
+  @override
+  Future<bool> requestPermission() async => throw StateError('no prompt here');
+  @override
+  Future<void> cancelAll() async {}
+  @override
+  Future<void> schedule(PlannedNotification n) async {}
 }
 
 void main() {
@@ -261,6 +276,260 @@ void main() {
     });
   });
 
+  group('reminders for several shops', () {
+    late _Recorder phone;
+    setUp(() {
+      phone = _Recorder();
+      NotificationService.backend = phone;
+    });
+
+    final now = DateTime(2027, 3, 8, 7);
+
+    test('every shop gets its reminders, and each title says which shop', () async {
+      await NotificationService.sync(
+        isPro: true,
+        settings: const NotifySettings(daily: false),
+        bookings: [booking(id: 1)],
+        shopName: 'Royal Costumes',
+        others: [
+          ShopReminders(name: 'Glow Studio', service: true, bookings: [booking(id: 1)]),
+        ],
+        now: now,
+      );
+      final titles = phone.scheduled.map((n) => n.title).toList();
+      expect(titles.where((t) => t.startsWith('Royal Costumes: ')), isNotEmpty);
+      expect(titles.where((t) => t.startsWith('Glow Studio: ')), isNotEmpty);
+      // two shops can both have a booking with id 1: the notifications must
+      // not replace each other
+      final ids = phone.scheduled.map((n) => n.id).toList();
+      expect(ids.toSet().length, ids.length, reason: 'every notification has its own id');
+    });
+
+    test('with one shop the titles are as they were', () async {
+      await NotificationService.sync(
+        isPro: true,
+        settings: const NotifySettings(daily: false),
+        bookings: [booking()],
+        shopName: 'Royal Costumes',
+        now: now,
+      );
+      expect(phone.scheduled.map((n) => n.title), contains('Send the items for #1'));
+      expect(phone.scheduled.any((n) => n.title.contains('Royal Costumes')), isFalse);
+    });
+
+    test('they are in time order across shops, and the cap holds for all', () async {
+      final many = [for (var i = 1; i <= 40; i++) booking(id: i, pickup: 9, event: 10, ret: 11)];
+      final n = await NotificationService.sync(
+        isPro: true,
+        settings: const NotifySettings(),
+        bookings: many,
+        shopName: 'A',
+        others: [ShopReminders(name: 'B', service: false, bookings: many)],
+        now: now,
+      );
+      expect(n, notifyLimit);
+      final times = phone.scheduled.map((n) => n.at).toList();
+      final sorted = [...times]..sort();
+      expect(times, sorted);
+    });
+
+    Booking made({
+      required String name,
+      int qty = 1,
+      String time = '',
+      required double rate,
+    }) => Booking(
+      id: 7,
+      uuid: 'u7',
+      number: 7,
+      customerId: 1,
+      customerName: 'Anu',
+      customerPhone: '9876543210',
+      eventDate: day(10),
+      pickupDate: day(10),
+      returnDate: day(10),
+      status: BookingStatus.booked,
+      rentTotal: rate * qty,
+      depositTotal: 0,
+      discount: 0,
+      notes: '',
+      remindDays: 1,
+      eventTime: time,
+      createdAt: day(1),
+      lines: [
+        BookingLine(
+          itemId: 1,
+          name: name,
+          qty: qty,
+          rateType: RateType.event,
+          rate: rate,
+          deposit: 0,
+          amount: rate * qty,
+        ),
+      ],
+    );
+
+    test('an appointment is worded as one, with its time, and has no return reminder', () {
+      final plan = planNotifications(
+        bookings: [made(name: 'Bridal makeup', rate: 15000, time: '09:30')],
+        settings: const NotifySettings(daily: false),
+        now: now,
+        service: true,
+      );
+      expect(plan.length, 1, reason: 'no "due back" reminder for a service');
+      expect(plan.single.title, 'Appointment coming up: #7');
+      expect(plan.single.body, contains('Bridal makeup'));
+      expect(plan.single.body, contains('09:30 AM'));
+    });
+
+    test('pieces are named in the reminder', () {
+      final plan = planNotifications(
+        bookings: [made(name: 'Chair', qty: 10, rate: 50)],
+        settings: const NotifySettings(daily: false),
+        now: now,
+      );
+      expect(plan.first.body, contains('Chair × 10'));
+    });
+  });
+
+  group('several reminder times a day', () {
+    final morning = DateTime(2027, 3, 8, 6, 0);
+
+    test('times are sorted, never repeated, and at most four', () {
+      const a = NotifySettings(hour: 18, minute: 30, extraTimes: [480, 480, 720]);
+      expect(a.times, [480, 720, 1110]);
+      expect([for (final t in a.timesOfDay) t.hour], [8, 12, 18]);
+      const many = NotifySettings(extraTimes: [600, 700, 800, 900, 1000]);
+      expect(many.times.length, NotifySettings.maxTimes);
+      // setting the times from a list keeps the earliest as the main one
+      final b = const NotifySettings().withTimes([1200, 480, 960]);
+      expect(b.hour, 8);
+      expect(b.minute, 0);
+      expect(b.extraTimes, [960, 1200]);
+      expect(const NotifySettings().withTimes(const []).times, [480],
+          reason: 'there is always at least one time');
+    });
+
+    test('the morning summary is set for every time of day', () {
+      final plan = planNotifications(
+        bookings: [booking()],
+        settings: const NotifySettings(
+          beforeEvent: false,
+          extraTimes: [18 * 60],
+        ),
+        now: morning,
+      );
+      // 8th to 11th has something to do on four days, twice a day
+      final byDay = <int, List<DateTime>>{};
+      for (final n in plan) {
+        byDay.putIfAbsent(n.at.day, () => []).add(n.at);
+      }
+      expect(byDay[9], isNotNull);
+      for (final times in byDay.values) {
+        expect(times.map((t) => t.hour), [8, 18]);
+      }
+      final ids = plan.map((n) => n.id).toList();
+      expect(ids.toSet().length, ids.length, reason: 'each has its own id');
+    });
+
+    test('each booking reminder is repeated at every time too', () {
+      final plan = planNotifications(
+        bookings: [booking()],
+        settings: const NotifySettings(
+          daily: false,
+          extraTimes: [13 * 60, 20 * 60],
+        ),
+        now: morning,
+      );
+      final send = plan.where((n) => n.title.startsWith('Send the items')).toList();
+      final back = plan.where((n) => n.title.startsWith('Items due back')).toList();
+      expect(send.map((n) => n.at.hour), [8, 13, 20]);
+      expect(send.every((n) => n.at.day == 8), isTrue, reason: 'two days before the 10th');
+      expect(back.map((n) => n.at.hour), [8, 13, 20]);
+      final ids = plan.map((n) => n.id).toList();
+      expect(ids.toSet().length, ids.length);
+    });
+
+    test('a time that has already passed today is not scheduled', () {
+      final plan = planNotifications(
+        bookings: [booking()],
+        settings: const NotifySettings(
+          daily: false,
+          extraTimes: [18 * 60],
+        ),
+        now: DateTime(2027, 3, 8, 12, 0), // after 8, before 18
+      );
+      final send = plan.where((n) => n.title.startsWith('Send the items')).toList();
+      expect(send.map((n) => n.at.hour), [18]);
+    });
+
+    test('with one time nothing changes', () {
+      final one = planNotifications(
+        bookings: [booking()],
+        settings: const NotifySettings(),
+        now: morning,
+      );
+      final same = planNotifications(
+        bookings: [booking()],
+        settings: const NotifySettings(extraTimes: []),
+        now: morning,
+      );
+      expect(one.map((n) => (n.id, n.at)), same.map((n) => (n.id, n.at)));
+    });
+
+    test('the times are saved and read back; damaged values are dropped', () async {
+      SharedPreferences.setMockInitialValues({});
+      await const NotifySettings(
+        hour: 7,
+        minute: 5,
+        extraTimes: [13 * 60, 20 * 60 + 30],
+      ).save();
+      final back = await NotifySettings.load();
+      expect(back.times, [7 * 60 + 5, 13 * 60, 20 * 60 + 30]);
+      SharedPreferences.setMockInitialValues({
+        'n_hour': 9,
+        'n_extra': ['600', 'abc', '-5', '99999', '1020'],
+      });
+      expect((await NotifySettings.load()).times, [540, 600, 1020]);
+      // a phone from before several times had none saved
+      SharedPreferences.setMockInitialValues({'n_hour': 6, 'n_minute': 30});
+      expect((await NotifySettings.load()).times, [390]);
+    });
+  });
+
+  group('asking for notifications on the first open', () {
+    late _Recorder phone;
+    setUp(() {
+      phone = _Recorder();
+      NotificationService.backend = phone;
+    });
+
+    test('asks the first time, and only the first time', () async {
+      SharedPreferences.setMockInitialValues({});
+      await askNotificationPermissionOnFirstOpen();
+      expect(phone.calls.where((c) => c == 'permission'), hasLength(1));
+      await askNotificationPermissionOnFirstOpen();
+      await askNotificationPermissionOnFirstOpen();
+      expect(phone.calls.where((c) => c == 'permission'), hasLength(1));
+    });
+
+    test('a person who said no is not asked at every start', () async {
+      SharedPreferences.setMockInitialValues({});
+      phone.permission = false;
+      await askNotificationPermissionOnFirstOpen();
+      await askNotificationPermissionOnFirstOpen();
+      expect(phone.calls.where((c) => c == 'permission'), hasLength(1));
+    });
+
+    test('a phone that cannot show the prompt never breaks the app', () async {
+      SharedPreferences.setMockInitialValues({});
+      NotificationService.backend = _Throwing();
+      await askNotificationPermissionOnFirstOpen(); // must not throw
+      final sp = await SharedPreferences.getInstance();
+      expect(sp.getBool('s_notifask'), isTrue, reason: 'not asked again next time');
+    });
+  });
+
   group('settings are kept', () {
     test('defaults, save and load', () async {
       const a = NotifySettings();
@@ -364,6 +633,124 @@ void main() {
         invoice: inv(name: 'அனு'),
       );
       expect(latin1.decode(bytes.sublist(0, 5)), '%PDF-');
+    });
+
+    // a one-pixel PNG: a real image the PDF can embed
+    final tinyPng = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGM4scAGiBggFAAwLgaRMe177wAAAABJRU5ErkJggg==',
+    );
+
+    test('the shop logo goes on the invoice and the receipt', () async {
+      final dir = Directory.systemTemp.createTempSync('rentpro_logo');
+      addTearDown(() {
+        PhotoStore.folderOverride = null;
+        dir.deleteSync(recursive: true);
+      });
+      PhotoStore.folderOverride = dir;
+      File('${dir.path}/aaaaaaaa-0001.png').writeAsBytesSync(tinyPng);
+      final withLogo = shop.copyWith(logoName: 'aaaaaaaa-0001.png');
+      final plain = await buildInvoicePdf(shop: shop, invoice: inv());
+      final logoPdf = await buildInvoicePdf(shop: withLogo, invoice: inv());
+      expect(latin1.decode(logoPdf.sublist(0, 5)), '%PDF-');
+      expect(logoPdf.length, isNot(plain.length), reason: 'the picture is in the file');
+      final receipt = await buildReceiptPdf(
+        shop: withLogo,
+        booking: booking(),
+        payment: pay(PaymentKind.advance),
+      );
+      expect(latin1.decode(receipt.sublist(0, 5)), '%PDF-');
+    });
+
+    test('a logo that is not a picture does not stop the invoice or receipt', () async {
+      final dir = Directory.systemTemp.createTempSync('rentpro_badlogo');
+      addTearDown(() {
+        PhotoStore.folderOverride = null;
+        dir.deleteSync(recursive: true);
+      });
+      PhotoStore.folderOverride = dir;
+      File('${dir.path}/eeeeeeee-0005.png').writeAsBytesSync([1, 2, 3, 4, 5, 6]);
+      final broken = shop.copyWith(logoName: 'eeeeeeee-0005.png');
+      final inv1 = await buildInvoicePdf(shop: broken, invoice: inv());
+      expect(latin1.decode(inv1.sublist(0, 5)), '%PDF-');
+      final rec = await buildReceiptPdf(
+        shop: broken,
+        booking: booking(),
+        payment: pay(PaymentKind.advance),
+      );
+      expect(latin1.decode(rec.sublist(0, 5)), '%PDF-');
+    });
+
+    test('a logo that is gone does not stop the invoice', () async {
+      final dir = Directory.systemTemp.createTempSync('rentpro_nologo');
+      addTearDown(() {
+        PhotoStore.folderOverride = null;
+        dir.deleteSync(recursive: true);
+      });
+      PhotoStore.folderOverride = dir;
+      final bytes = await buildInvoicePdf(
+        shop: shop.copyWith(logoName: 'dddddddd-0004.png'),
+        invoice: inv(),
+      );
+      expect(latin1.decode(bytes.sublist(0, 5)), '%PDF-');
+    });
+
+    test('pieces and services build, with and without GST', () async {
+      Invoice withQty({required bool gst}) => Invoice(
+        id: 2,
+        uuid: 'y',
+        bookingId: 2,
+        prefix: 'RNT',
+        number: 13,
+        date: day(12),
+        cancelled: false,
+        customerName: 'Anu',
+        customerPhone: '9876543210',
+        customerAddress: '',
+        customerGstin: '',
+        supplyState: gst ? '33' : '',
+        interState: false,
+        gstEnabled: gst,
+        taxInclusive: false,
+        discount: 0,
+        taxable: 500,
+        cgst: gst ? 45 : 0,
+        sgst: gst ? 45 : 0,
+        igst: 0,
+        total: gst ? 590 : 500,
+        eventDate: day(10),
+        pickupDate: day(9),
+        returnDate: day(11),
+        paid: 0,
+        bookingNumber: 4,
+        lines: [
+          InvoiceLine(
+            name: 'Chair',
+            hsn: '9973',
+            rateType: RateType.event,
+            rate: 50,
+            days: 1,
+            qty: 10,
+            gstRate: gst ? 18 : 0,
+            taxable: 500,
+            cgst: gst ? 45 : 0,
+            sgst: gst ? 45 : 0,
+            igst: 0,
+            total: gst ? 590 : 500,
+          ),
+        ],
+      );
+      for (final gst in [true, false]) {
+        final rental = await buildInvoicePdf(shop: shop, invoice: withQty(gst: gst));
+        expect(latin1.decode(rental.sublist(0, 5)), '%PDF-');
+        // a makeup artist's bill: services, an appointment time, no days
+        final service = await buildInvoicePdf(
+          shop: shop.copyWith(type: ShopType.makeup),
+          invoice: withQty(gst: gst),
+          eventTime: '14:30',
+        );
+        expect(latin1.decode(service.sublist(0, 5)), '%PDF-');
+        expect(service.length, isNot(rental.length));
+      }
     });
 
     test('a receipt and a refund voucher build', () async {

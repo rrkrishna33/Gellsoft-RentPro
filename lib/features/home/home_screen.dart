@@ -55,7 +55,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => syncNotifications(ref));
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // first time the app opens: ask to show notifications, then set them
+      await askNotificationPermissionOnFirstOpen();
+      if (mounted) await syncNotifications(ref);
+    });
   }
 
   @override

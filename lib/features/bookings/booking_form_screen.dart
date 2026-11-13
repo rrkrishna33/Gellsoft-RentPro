@@ -282,6 +282,11 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
   Future<void> _save() async {
     if (_saving) return;
     FocusScope.of(context).unfocus();
+    if (_service) {
+      // one appointment: nothing is picked up or returned on other days
+      _pickup = _event;
+      _return = _event;
+    }
     if (_customer == null) {
       _fail(tr('Choose the customer.'));
       return;

@@ -31,6 +31,7 @@ class BackupService {
     's_hideamounts',
     // which shop is open, and the PIN guess counter, belong to this phone
     's_activeshop',
+    's_notifask',
     's_fail',
     's_lockuntil',
   };

@@ -93,6 +93,7 @@ class _UpgradeBody extends ConsumerWidget {
       tr('Unlimited bookings every month'),
       tr('Unlimited photos on every booking'),
       tr('Daily and custom reminder notifications'),
+      tr('Several reminder times a day'),
       tr('Automatic daily backup to Google Drive'),
       tr('More than one shop, each kept separately'),
       tr('Staff logins (Admin, Staff, Cashier)'),

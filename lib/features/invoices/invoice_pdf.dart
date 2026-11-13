@@ -79,6 +79,9 @@ pw.Widget _kv(PdfTextKit kit, String k, String v, {bool bold = false, PdfColor? 
 /// [payments] are the payments on the booking; [depositTotal] and
 /// [depositHeld] are printed as a note, because a deposit is returned and so
 /// is not part of the invoice.
+///
+/// A logo that cannot be read as a picture (a damaged file) is left off rather
+/// than stopping the invoice.
 Future<Uint8List> buildInvoicePdf({
   required BusinessProfile shop,
   required Invoice invoice,
@@ -89,10 +92,35 @@ Future<Uint8List> buildInvoicePdf({
   /// The appointment time of a service booking ("14:30"), printed with the date.
   String eventTime = '',
 }) async {
-  final kit = await PdfTextKit.load();
   final logo = await shop.logoBytes();
+  Future<Uint8List> build(Uint8List? picture) => _invoicePdf(
+    shop: shop,
+    inv: invoice,
+    logo: picture,
+    payments: payments,
+    depositTotal: depositTotal,
+    depositHeld: depositHeld,
+    eventTime: eventTime,
+  );
+  if (logo == null) return build(null);
+  try {
+    return await build(logo);
+  } catch (_) {
+    return build(null);
+  }
+}
+
+Future<Uint8List> _invoicePdf({
+  required BusinessProfile shop,
+  required Invoice inv,
+  required Uint8List? logo,
+  required List<Payment> payments,
+  required double depositTotal,
+  required double depositHeld,
+  required String eventTime,
+}) async {
+  final kit = await PdfTextKit.load();
   final service = shop.type.isService;
-  final inv = invoice;
   final gst = inv.gstEnabled;
   final doc = pw.Document(
     theme: kit.theme,
@@ -356,8 +384,23 @@ Future<Uint8List> buildReceiptPdf({
   required Booking booking,
   required Payment payment,
 }) async {
-  final kit = await PdfTextKit.load();
   final logo = await shop.logoBytes();
+  if (logo == null) return _receiptPdf(shop, booking, payment, null);
+  try {
+    return await _receiptPdf(shop, booking, payment, logo);
+  } catch (_) {
+    // a logo that is not a readable picture is left off
+    return _receiptPdf(shop, booking, payment, null);
+  }
+}
+
+Future<Uint8List> _receiptPdf(
+  BusinessProfile shop,
+  Booking booking,
+  Payment payment,
+  Uint8List? logo,
+) async {
+  final kit = await PdfTextKit.load();
   final doc = pw.Document(theme: kit.theme, title: 'Receipt #${payment.id}', author: shop.name);
   final refund = payment.kind == PaymentKind.refund;
   doc.addPage(

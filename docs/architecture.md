@@ -4,7 +4,7 @@ Flutter (Android only), Riverpod, SQLite (sqflite). The look and the subscriptio
 
 ## Folders
 - `lib/core`: theme, formats, GST and booking maths (`booking_math.dart`, `gst.dart`), sharing and WhatsApp links (`share.dart`), PDF fonts.
-- `lib/data`: the database (`database.dart`, schema version 1), repositories (`repositories.dart` items and customers, `booking_repo.dart`, `invoice_repo.dart`, `report_repo.dart`), exports (`csv_export.dart`), reminders (`reminders.dart`), notifications (`notifications.dart`), backup (`backup_service.dart`, `cloud_backup.dart`), shop profile and settings.
+- `lib/data`: the database (`database.dart`, schema version 3), the list of shops (`shops.dart`), staff logins (`staff.dart`), repositories (`repositories.dart` items and customers, `booking_repo.dart`, `invoice_repo.dart`, `report_repo.dart`), exports (`csv_export.dart`), reminders (`reminders.dart`), notifications (`notifications.dart`), backup (`backup_service.dart`, `cloud_backup.dart`), shop profile and settings.
 - `lib/features`: one folder per area (home, bookings, items, customers, invoices, reminders, reports, settings, onboarding, splash).
 - `lib/subscription`: plan rules (`plan.dart`), license (`license_*.dart`), Google Play purchase, account, clock check, Pro screen.
 - `lib/l10n`: `tr('English')` and the Tamil table `ta.dart`; `test/translation_test.dart` makes sure every phrase has Tamil.
@@ -15,6 +15,15 @@ Flutter (Android only), Riverpod, SQLite (sqflite). The look and the subscriptio
 - Money: `splitMoney` shares the discount between lines by amount and taxes each line at its own rate (added on top, or taken out when rents include GST). A booking stores `rent_total`, `tax_total` and `payable`; deposit is separate and never taxed.
 - Invoices keep their own copy of the customer and every line, so they never change; numbers are never reused.
 - `buildReminders` (pure) drives the Reminders page, the Home badge and the notifications.
+
+## Several shops
+Each shop is a separate SQLite file (`gellsoft_rentpro.db` for the first, `gellsoft_rentpro_s2.db` and so on) and its own shop details in preferences (`b_name`, then `b_s2_name`): `Shops` (in `shops.dart`) keeps the list and the open shop, and `Shops.key` names a setting for a shop. Switching closes the database, forgets who is signed in and restarts the screens (`RestartWidget`), so no screen holds the old shop's data. Backups (`backup_service.dart`) carry every shop (`db` is the first, `shopDbs` the others); staff logins and the recovery code stay with the phone. Reminders are planned for every shop (`BookingRepo.forRemindersOf`), with notification ids kept apart per shop.
+
+## Quantity
+An item has `quantity` pieces and a booking line has `qty`. `BookingRepo._availability` finds, for the days asked about, the most pieces held on any one day by other open bookings (a late item still out keeps its pieces), and the free pieces are the stock less that. Rate and deposit are for one piece; a line's amount is rate x days x qty. A service business (`ShopType.isService`) skips the availability check.
+
+## Staff logins
+`Permission` and `Role.can` in `staff.dart` are the only place that says what a role may do; screens ask `permsProvider`. `LockGate` covers the app with the sign-in screen while there are people and nobody is signed in.
 
 ## Notifications
 `planNotifications` (pure) works out the next 14 days; `NotificationService.sync` clears and sets them again each time the app opens or something changes. They are Pro only and use inexact alarms (no special permission).

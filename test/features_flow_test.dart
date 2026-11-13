@@ -650,4 +650,50 @@ void main() {
     expect(s.daily, isFalse);
     expect(s.beforeEvent, isTrue);
   });
+
+  testDb('settings: Pro can add several reminder times and remove them', (t) async {
+    await seed(t);
+    await t.pumpWidget(host(const Scaffold(body: SettingsScreen())));
+    await settle(t);
+    // one time to start; no remove button while there is only one
+    expect(find.text('Reminder time'), findsOneWidget);
+    expect(find.text('Another reminder'), findsNothing);
+    expect(find.text('Add a reminder time'), findsOneWidget);
+
+    Future<void> addTime() async {
+      await t.scrollUntilVisible(
+        find.text('Add a reminder time'),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await t.tap(find.text('Add a reminder time'));
+      await settle(t);
+      await t.tap(find.text('OK'));
+      await settle(t);
+    }
+
+    await addTime(); // the time picker opens on 6 PM
+    var s = (await t.runAsync(NotifySettings.load))!;
+    expect(s.times, [8 * 60, 18 * 60]);
+    expect(find.text('Another reminder'), findsOneWidget);
+    expect(phone.cancels, greaterThan(0), reason: 'the reminders were set again');
+
+    // the same time again is not added twice
+    await addTime();
+    s = (await t.runAsync(NotifySettings.load))!;
+    expect(s.times, [8 * 60, 18 * 60]);
+
+    // up to four
+    await t.scrollUntilVisible(
+      find.text('Another reminder'),
+      -200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.byIcon(Icons.close), findsNWidgets(2));
+    await t.tap(find.byIcon(Icons.close).last);
+    await settle(t);
+    s = (await t.runAsync(NotifySettings.load))!;
+    expect(s.times.length, 1);
+    expect(find.text('Another reminder'), findsNothing);
+  });
 }

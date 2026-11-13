@@ -657,4 +657,8 @@ const taStrings = <String, String>{
   '{items} for {name} on {date}{time}': '{name}-க்கான {items} - {date}{time}',
   '{n} photos were not added: the free plan keeps {max} on a booking.': '{n} படங்கள் சேர்க்கப்படவில்லை: இலவசத் திட்டத்தில் ஒரு முன்பதிவுக்கு {max} படங்கள் மட்டுமே.',
   '{n} pieces': '{n} எண்ணிக்கை',
+  'Another reminder': 'மற்றொரு நினைவூட்டல்',
+  'Add a reminder time': 'நினைவூட்டல் நேரத்தைச் சேர்',
+  'Be reminded more than once a day, up to {n} times': 'ஒரு நாளில் ஒன்றுக்கு மேற்பட்ட முறை நினைவூட்டல் பெறுங்கள், அதிகபட்சம் {n} முறை',
+  'Several reminder times a day': 'ஒரு நாளில் பல நினைவூட்டல் நேரங்கள்',
 };
