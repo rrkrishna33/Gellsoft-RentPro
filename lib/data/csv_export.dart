@@ -97,7 +97,7 @@ class CsvExport {
         COALESCE((SELECT SUM(CASE WHEN p.kind='deposit' THEN p.amount
                                   WHEN p.kind='refund' THEN -p.amount ELSE 0 END)
                   FROM payments p WHERE p.booking_id = b.id), 0) AS held,
-        (SELECT GROUP_CONCAT(bi.name, '; ') FROM booking_items bi
+        (SELECT GROUP_CONCAT(CASE WHEN bi.qty > 1 THEN bi.name || ' x ' || bi.qty ELSE bi.name END, '; ') FROM booking_items bi
            WHERE bi.booking_id = b.id) AS item_names
       FROM bookings b JOIN customers c ON c.id = b.customer_id
       WHERE b.deleted = 0 AND b.event_date >= ? AND b.event_date < ?
@@ -281,7 +281,7 @@ class CsvExport {
   Future<List<String>> gstr1Hsn(DateRange r) async {
     final d = await AppDatabase.instance.db;
     final rows = await d.rawQuery('''
-      SELECT ii.hsn AS hsn, ii.gst_rate AS rate, COUNT(*) AS qty,
+      SELECT ii.hsn AS hsn, ii.gst_rate AS rate, SUM(ii.qty) AS qty,
              SUM(ii.total) AS total_v, SUM(ii.taxable) AS taxable_r,
              SUM(ii.igst) AS igst_r, SUM(ii.cgst) AS cgst_r, SUM(ii.sgst) AS sgst_r
       FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id

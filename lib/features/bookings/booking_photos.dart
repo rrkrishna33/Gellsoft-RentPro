@@ -43,16 +43,51 @@ class PhotosSection extends ConsumerWidget {
       ),
     );
     if (choice == null || !context.mounted) return;
-    final path = await PhotoStore.take(camera: choice.$1);
-    if (path == null) return;
-    try {
-      await ref
-          .read(bookingRepoProvider)
-          .addPhoto(booking.id, path: path, stage: choice.$2, isPro: isPro);
-    } on BookingException {
-      // the free limit was reached while the camera was open
-      await PhotoStore.delete(path);
-      if (context.mounted) {
+    final repo = ref.read(bookingRepoProvider);
+    if (choice.$1) {
+      // the camera: one photo
+      final path = await PhotoStore.take(camera: true);
+      if (path == null) return;
+      try {
+        await repo.addPhoto(booking.id, path: path, stage: choice.$2, isPro: isPro);
+      } on BookingException {
+        // the free limit was reached while the camera was open
+        await PhotoStore.delete(path);
+        if (context.mounted) {
+          await showProPrompt(context, ProFeature.unlimitedPhotos);
+        }
+      }
+    } else {
+      // the gallery: as many as the person ticks (the free plan's room is the
+      // most it can take)
+      final room = FreePlan.photosPerBooking - booking.photos.length;
+      final paths = await PhotoStore.takeMany(limit: isPro ? null : room);
+      if (paths.isEmpty) return;
+      var skipped = 0;
+      for (final path in paths) {
+        try {
+          await repo.addPhoto(
+            booking.id,
+            path: path,
+            stage: choice.$2,
+            isPro: isPro,
+          );
+        } on BookingException {
+          await PhotoStore.delete(path);
+          skipped++;
+        }
+      }
+      if (skipped > 0 && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              tr('{n} photos were not added: the free plan keeps {max} on a booking.', {
+                'n': skipped,
+                'max': FreePlan.photosPerBooking,
+              }),
+            ),
+          ),
+        );
         await showProPrompt(context, ProFeature.unlimitedPhotos);
       }
     }
@@ -260,6 +295,7 @@ class _AddSheetState extends State<_AddSheet> {
           ListTile(
             leading: const Icon(Icons.photo_library_outlined),
             title: Text(tr('Choose from gallery')),
+            subtitle: Text(tr('Tick as many photos as you like')),
             onTap: () => Navigator.pop(context, (false, _stage)),
           ),
         ],

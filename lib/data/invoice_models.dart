@@ -8,6 +8,7 @@ class InvoiceLine {
     required this.rateType,
     required this.rate,
     required this.days,
+    this.qty = 1,
     required this.gstRate,
     required this.taxable,
     required this.cgst,
@@ -23,6 +24,9 @@ class InvoiceLine {
 
   /// Days charged (1 for a flat per-event rate).
   final int days;
+
+  /// How many pieces; [rate] is the rate of one piece.
+  final int qty;
   final double gstRate;
   final double taxable;
   final double cgst;

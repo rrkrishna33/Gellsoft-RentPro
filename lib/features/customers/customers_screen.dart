@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../data/repositories.dart';
+import '../../data/staff.dart';
 import '../../l10n/strings.dart';
 import '../common/widgets.dart';
 import 'customer_form_screen.dart';
@@ -16,6 +17,7 @@ class CustomersScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final customers = ref.watch(customersProvider);
     final searching = ref.watch(customerSearchProvider).trim().isNotEmpty;
+    final canEdit = ref.watch(permsProvider).can(Permission.editCustomers);
 
     Future<void> open([Customer? c]) async {
       await Navigator.of(context).push(
@@ -78,7 +80,7 @@ class CustomersScreen extends ConsumerWidget {
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (_, i) => _CustomerTile(
                     customer: list[i],
-                    onTap: () => open(list[i]),
+                    onTap: canEdit ? () => open(list[i]) : null,
                   ),
                 );
               },
@@ -93,7 +95,7 @@ class CustomersScreen extends ConsumerWidget {
 class _CustomerTile extends StatelessWidget {
   const _CustomerTile({required this.customer, required this.onTap});
   final Customer customer;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {

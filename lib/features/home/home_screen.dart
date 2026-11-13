@@ -10,7 +10,9 @@ import '../../data/business_profile.dart';
 import '../../data/dashboard_repo.dart';
 import '../../data/notifications.dart';
 import '../../data/reminders.dart';
+import '../../data/staff.dart';
 import '../../l10n/strings.dart';
+import '../shops/shop_switcher.dart';
 import '../bookings/booking_detail_screen.dart';
 import '../bookings/booking_form_screen.dart';
 import '../bookings/bookings_screen.dart';
@@ -97,7 +99,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       const ItemsScreen(),
       const CustomersScreen(),
     ];
-    return AuroraBackground(
+    final service = widget.profile.type.isService;
+    // The back button on Bookings, Items or Customers goes to Home first;
+    // pressed again on Home it closes the app.
+    return PopScope(
+      canPop: _tab == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          setState(() => _tab = 0);
+          _refresh();
+        }
+      },
+      child: AuroraBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         drawer: AppDrawer(profile: widget.profile),
@@ -138,10 +151,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   if (i == 0) _refresh();
                 },
                 onNew: _newBooking,
+                itemsLabel: service ? tr('Services') : tr('Items'),
               ),
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -154,10 +169,12 @@ class _NavBar extends StatelessWidget {
     required this.index,
     required this.onTab,
     required this.onNew,
+    required this.itemsLabel,
   });
   final int index;
   final ValueChanged<int> onTab;
   final VoidCallback onNew;
+  final String itemsLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -230,7 +247,7 @@ class _NavBar extends StatelessWidget {
                   child: Icon(Icons.add, size: 30, color: aurora.onCta),
                 ),
               ),
-              item(Icons.checkroom_outlined, tr('Items'), 2),
+              item(Icons.checkroom_outlined, itemsLabel, 2),
               item(Icons.people_alt_outlined, tr('Customers'), 3),
             ],
           ),
@@ -256,9 +273,14 @@ class _HomeTab extends ConsumerWidget {
     final accents = Theme.of(context).extension<TileAccents>();
     final big = MediaQuery.textScalerOf(context).scale(1) > 1.25;
 
+    final perms = ref.watch(permsProvider);
     final tiles = <_Tile>[
       _Tile(tr('Bookings'), Icons.event_available_outlined, () => onTab(1)),
-      _Tile(tr('Items'), Icons.checkroom_outlined, () => onTab(2)),
+      _Tile(
+        profile.type.isService ? tr('Services') : tr('Items'),
+        Icons.checkroom_outlined,
+        () => onTab(2),
+      ),
       _Tile(tr('Customers'), Icons.people_alt_outlined, () => onTab(3)),
       _Tile(
         tr('Reminders'),
@@ -271,21 +293,24 @@ class _HomeTab extends ConsumerWidget {
         Icons.receipt_long_outlined,
         () => openPage<void>(context, const InvoiceListScreen()),
       ),
-      _Tile(
-        tr('Reports'),
-        Icons.bar_chart_rounded,
-        () => openPage<void>(context, const ReportsScreen()),
-      ),
-      _Tile(
-        tr('Billing and GST'),
-        Icons.percent_rounded,
-        () => openPage<void>(context, const BillingSettingsScreen()),
-      ),
-      _Tile(
-        tr('Settings'),
-        Icons.settings_outlined,
-        () => openPage<void>(context, settingsPage()),
-      ),
+      if (perms.can(Permission.seeReports))
+        _Tile(
+          tr('Reports'),
+          Icons.bar_chart_rounded,
+          () => openPage<void>(context, const ReportsScreen()),
+        ),
+      if (perms.can(Permission.settings)) ...[
+        _Tile(
+          tr('Billing and GST'),
+          Icons.percent_rounded,
+          () => openPage<void>(context, const BillingSettingsScreen()),
+        ),
+        _Tile(
+          tr('Settings'),
+          Icons.settings_outlined,
+          () => openPage<void>(context, settingsPage()),
+        ),
+      ],
     ];
 
     return RefreshIndicator(
@@ -305,7 +330,7 @@ class _HomeTab extends ConsumerWidget {
             const _Dashboard(),
             if (reminders.isNotEmpty) ...[
               const SizedBox(height: 14),
-              _AttentionCard(items: reminders),
+              _AttentionCard(items: reminders, service: profile.type.isService),
             ],
             const SizedBox(height: 20),
             Text(
@@ -313,7 +338,10 @@ class _HomeTab extends ConsumerWidget {
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 10),
-            _NewBookingBanner(onTap: onNewBooking),
+            _NewBookingBanner(
+              onTap: onNewBooking,
+              service: profile.type.isService,
+            ),
             const SizedBox(height: 12),
             GridView.count(
               crossAxisCount: big ? 2 : 3,
@@ -334,7 +362,7 @@ class _HomeTab extends ConsumerWidget {
   }
 }
 
-class _Header extends StatelessWidget {
+class _Header extends ConsumerWidget {
   const _Header({required this.profile});
   final BusinessProfile profile;
 
@@ -345,9 +373,11 @@ class _Header extends StatelessWidget {
       : tr('Good evening');
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final aurora = AuroraStyle.of(context);
+    final logo = ref.watch(logoFileProvider).valueOrNull;
+    final canSettings = ref.watch(permsProvider).can(Permission.settings);
     final shopName = profile.name.trim();
     final initial = String.fromCharCode(
       (shopName.isEmpty ? '?' : shopName).runes.first,
@@ -370,46 +400,75 @@ class _Header extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _greeting(DateTime.now()),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
-              ),
-              Text(
-                profile.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.3,
+          // the shop name opens the list of shops
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => showShopSwitcher(context),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _greeting(DateTime.now()),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
                 ),
-              ),
-            ],
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        profile.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.unfold_more_rounded,
+                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         const SizedBox(width: 12),
         Pressable(
-          onTap: () => openPage<void>(context, settingsPage()),
+          onTap: canSettings
+              ? () => openPage<void>(context, settingsPage())
+              : () {},
           width: 42,
           height: 42,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            gradient: aurora.cta,
+            gradient: logo == null ? aurora.cta : null,
+            color: logo == null ? null : Colors.white,
             boxShadow: aurora.ctaShadow,
           ),
-          child: Center(
-            child: Text(
-              initial,
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: aurora.onCta,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+          child: logo != null
+              ? ClipOval(
+                  child: Image.file(
+                    logo,
+                    width: 42,
+                    height: 42,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Center(child: Text(initial)),
+                  ),
+                )
+              : Center(
+                  child: Text(
+                    initial,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: aurora.onCta,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
         ),
       ],
     );
@@ -422,7 +481,11 @@ class _Dashboard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final counts = ref.watch(dashboardProvider).valueOrNull;
-    final hidden = ref.watch(hideAmountsProvider);
+    final canSee = ref.watch(permsProvider).can(Permission.seeReports);
+    final service =
+        ref.watch(profileProvider).valueOrNull?.type.isService ?? false;
+    // a person who may not see the money gets the amounts hidden
+    final hidden = ref.watch(hideAmountsProvider) || !canSee;
     final aurora = AuroraStyle.of(context);
     final text = Theme.of(context).textTheme;
     final c = counts ?? const DashboardCounts();
@@ -491,6 +554,7 @@ class _Dashboard extends ConsumerWidget {
                           style: text.bodyMedium?.copyWith(color: soft),
                         ),
                       ),
+                      if (canSee)
                       IconButton(
                         tooltip: hidden
                             ? tr('Show amounts')
@@ -540,13 +604,17 @@ class _Dashboard extends ConsumerWidget {
                           counts == null ? '...' : shown(c.balanceDue),
                           color: c.balanceDue > 0 ? warn : null,
                         ),
-                        stat(tr('Out today'), '${c.pickupsToday}'),
-                        stat(tr('Back today'), '${c.returnsToday}'),
-                        stat(
-                          tr('Overdue'),
-                          '${c.overdueReturns}',
-                          color: c.overdueReturns > 0 ? warn : null,
-                        ),
+                        if (service)
+                          stat(tr('Appointments today'), '${c.pickupsToday}')
+                        else ...[
+                          stat(tr('Out today'), '${c.pickupsToday}'),
+                          stat(tr('Back today'), '${c.returnsToday}'),
+                          stat(
+                            tr('Overdue'),
+                            '${c.overdueReturns}',
+                            color: c.overdueReturns > 0 ? warn : null,
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -578,8 +646,9 @@ class _Glow extends StatelessWidget {
 
 /// The most urgent things from the reminders, and a way into the full list.
 class _AttentionCard extends StatelessWidget {
-  const _AttentionCard({required this.items});
+  const _AttentionCard({required this.items, required this.service});
   final List<ReminderItem> items;
+  final bool service;
 
   @override
   Widget build(BuildContext context) {
@@ -631,7 +700,7 @@ class _AttentionCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        '${reminderTitle(i.kind)}: #${i.booking.number} ${i.booking.customerName}',
+                        '${reminderTitle(i.kind, service: service)}: #${i.booking.number} ${i.booking.customerName}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium,
@@ -656,8 +725,9 @@ class _AttentionCard extends StatelessWidget {
 }
 
 class _NewBookingBanner extends StatelessWidget {
-  const _NewBookingBanner({required this.onTap});
+  const _NewBookingBanner({required this.onTap, required this.service});
   final VoidCallback onTap;
+  final bool service;
 
   @override
   Widget build(BuildContext context) {
@@ -695,7 +765,9 @@ class _NewBookingBanner extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  tr('Pick the customer, the items and the dates'),
+                  service
+                      ? tr('Pick the customer, the services and the date')
+                      : tr('Pick the customer, the items and the dates'),
                   style: text.bodySmall?.copyWith(
                     color: aurora.onCta.withValues(alpha: 0.85),
                   ),

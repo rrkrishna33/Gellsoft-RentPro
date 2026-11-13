@@ -5,6 +5,7 @@ import '../../core/constants.dart';
 import '../../core/restart_widget.dart';
 import '../../data/app_settings.dart';
 import '../../data/business_profile.dart';
+import '../../data/staff.dart';
 import '../../l10n/strings.dart';
 import '../../data/notifications.dart';
 import '../../subscription/entitlement.dart';
@@ -12,9 +13,11 @@ import '../../subscription/plan.dart';
 import '../../subscription/pro_prompt.dart';
 import '../../subscription/pro_ui.dart';
 import '../onboarding/onboarding_screen.dart';
+import '../shops/shop_switcher.dart';
 import 'account_screen.dart';
 import 'backup_screen.dart';
 import 'billing_settings_screen.dart';
+import 'staff_screen.dart';
 
 /// Shop details, language, theme and the app version.
 class SettingsScreen extends ConsumerWidget {
@@ -100,6 +103,37 @@ class SettingsScreen extends ConsumerWidget {
                       ref.read(appSettingsProvider.notifier).setThemeMode(m);
                     }
                   },
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.store_mall_directory_outlined),
+                title: Text(tr('Your shops')),
+                subtitle: Text(
+                  tr('Run more than one shop, each kept separately'),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => showShopSwitcher(context),
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.groups_2_outlined),
+                title: Text(tr('Staff logins')),
+                subtitle: Text(
+                  (ref.watch(staffUsersProvider).valueOrNull?.isNotEmpty ??
+                          false)
+                      ? tr('On')
+                      : tr('Admin, Staff and Cashier with their own PINs'),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const StaffScreen()),
                 ),
               ),
             ],

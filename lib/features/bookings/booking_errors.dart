@@ -7,6 +7,9 @@ String bookingErrorText(BookingException e) => switch (e.error) {
   BookingError.itemBusy => tr('{item} is already booked for some of these days.', {
     'item': e.detail,
   }),
+  BookingError.notEnough => tr('Not enough {item} are free for these days.', {
+    'item': e.detail,
+  }),
   BookingError.badDates => tr(
     'The dates must go in order: pickup, then the event, then return.',
   ),

@@ -34,6 +34,7 @@ class _Boom extends BookingRepo {
     double advance = 0,
     PayMode advanceMode = PayMode.cash,
     GstConfig gst = GstConfig.off,
+    bool checkAvailability = true,
     DateTime? now,
   }) async {
     tries++;

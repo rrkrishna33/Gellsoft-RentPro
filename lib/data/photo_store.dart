@@ -15,6 +15,10 @@ class PhotoStore {
   @visibleForTesting
   static Future<String?> Function(bool camera)? picker;
 
+  /// Replaced in tests: returns the files picked from the gallery.
+  @visibleForTesting
+  static Future<List<String>> Function()? manyPicker;
+
   /// Where photos are kept; tests point it at a temporary folder.
   @visibleForTesting
   static Directory? folderOverride;
@@ -50,6 +54,63 @@ class PhotoStore {
     final dest = p.join(dir.path, '${newUuid()}$ext');
     await File(source).copy(dest);
     return dest;
+  }
+
+  /// The full path of a saved file, from its name.
+  static Future<String> pathOf(String name) async =>
+      p.join((await folder()).path, name);
+
+  /// Asks for a picture from the gallery to use as the shop's logo, keeps a
+  /// copy in the app's folder and returns its file name (not the path).
+  /// Null when the user cancels.
+  static Future<String?> pickLogo() async {
+    final hook = picker;
+    final String? source;
+    if (hook != null) {
+      source = await hook(false);
+    } else {
+      final shot = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 700,
+        maxHeight: 700,
+        imageQuality: 90,
+      );
+      source = shot?.path;
+    }
+    if (source == null) return null;
+    final dir = await folder();
+    final ext = p.extension(source).isEmpty ? '.jpg' : p.extension(source);
+    final name = '${newUuid()}$ext';
+    await File(source).copy(p.join(dir.path, name));
+    return name;
+  }
+
+  /// Several pictures at once from the gallery (the person ticks as many as
+  /// they like). [limit] stops the picker at that many when it is known.
+  /// Each is copied into the app's folder; returns the saved paths, empty
+  /// when the user cancels.
+  static Future<List<String>> takeMany({int? limit}) async {
+    final hook = manyPicker;
+    final List<String> sources;
+    if (hook != null) {
+      sources = await hook();
+    } else {
+      final shots = await ImagePicker().pickMultiImage(
+        maxWidth: 1600,
+        imageQuality: 80,
+        limit: limit != null && limit >= 2 ? limit : null,
+      );
+      sources = [for (final s in shots) s.path];
+    }
+    final dir = await folder();
+    final saved = <String>[];
+    for (final source in sources) {
+      final ext = p.extension(source).isEmpty ? '.jpg' : p.extension(source);
+      final dest = p.join(dir.path, '${newUuid()}$ext');
+      await File(source).copy(dest);
+      saved.add(dest);
+    }
+    return saved;
   }
 
   /// Deletes a saved photo file. A file that is already gone is fine.

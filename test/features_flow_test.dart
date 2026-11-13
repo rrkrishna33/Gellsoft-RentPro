@@ -199,6 +199,7 @@ void main() {
         share.pdfSharer = null;
         wa.pdfWhatsAppSender = null;
         PhotoStore.picker = null;
+        PhotoStore.manyPicker = null;
         PhotoStore.folderOverride = null;
         await t.runAsync(() => AppDatabase.instance.close());
         AppDatabase.pathOverride = null;
@@ -439,7 +440,7 @@ void main() {
   testDb('photos: Pro keeps more, and the stage can be chosen', (t) async {
     final id = await seed(t);
     var n = 0;
-    PhotoStore.picker = (camera) async => fakeShot('pro${n++}');
+    PhotoStore.manyPicker = () async => [fakeShot('pro${n++}')];
     await t.pumpWidget(host(BookingDetailScreen(bookingId: id)));
     await settle(t);
     expect(find.textContaining('on the free plan'), findsNothing);
@@ -456,6 +457,47 @@ void main() {
     final b = await reload(t, id);
     expect(b.photos.length, 3);
     expect(b.photos.map((p) => p.stage), ['pickup', 'return', 'pickup']);
+  });
+
+  testDb('gallery: several photos are added at once', (t) async {
+    final id = await seed(t);
+    PhotoStore.manyPicker = () async => [
+      fakeShot('g0'),
+      fakeShot('g1'),
+      fakeShot('g2'),
+    ];
+    await t.pumpWidget(host(BookingDetailScreen(bookingId: id)));
+    await settle(t);
+    await t.tap(find.text('Add photo'));
+    await settle(t);
+    await t.tap(find.widgetWithText(ChoiceChip, 'Return'));
+    await settle(t);
+    await t.tap(find.text('Choose from gallery'));
+    await settle(t);
+    final b = await reload(t, id);
+    expect(b.photos.length, 3);
+    expect(b.photos.every((p) => p.stage == 'return'), isTrue);
+    expect(b.photos.every((p) => File(p.path).existsSync()), isTrue);
+  });
+
+  testDb('gallery: the free plan takes what fits and offers Pro for the rest', (t) async {
+    final id = await seed(t);
+    PhotoStore.manyPicker = () async => [
+      fakeShot('f0'),
+      fakeShot('f1'),
+      fakeShot('f2'),
+    ];
+    await t.pumpWidget(host(BookingDetailScreen(bookingId: id), pro: false));
+    await settle(t);
+    await t.tap(find.text('Add photo'));
+    await settle(t);
+    await t.tap(find.text('Choose from gallery'));
+    await settle(t);
+    final b = await reload(t, id);
+    expect(b.photos.length, 2, reason: 'two fit on the free plan');
+    // the one that did not fit is not left behind on the phone
+    expect(photoDir.listSync().whereType<File>().length >= 2, isTrue);
+    expect(find.text('This needs Pro'), findsOneWidget);
   });
 
   testDb('a cancelled picture never gets saved', (t) async {

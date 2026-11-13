@@ -11,7 +11,9 @@ import '../l10n/strings.dart';
 import '../subscription/entitlement.dart';
 import 'booking_models.dart';
 import 'booking_repo.dart';
+import 'business_profile.dart';
 import 'reminders.dart';
+import 'shops.dart';
 
 /// What the shop owner chose for reminder notifications (a Pro feature).
 class NotifySettings {
@@ -101,12 +103,20 @@ const notifyLimit = 60;
 ///
 /// This is a pure function of the bookings, the settings and the time, so it
 /// can be checked without a phone.
+///
+/// [idOffset] keeps the ids of one shop apart from another's, [label] is put
+/// before each title when there is more than one shop, and [service] words
+/// the reminders for appointments instead of items going out and back.
 List<PlannedNotification> planNotifications({
   required List<Booking> bookings,
   required NotifySettings settings,
   required DateTime now,
   int days = notifyDaysAhead,
+  int idOffset = 0,
+  String label = '',
+  bool service = false,
 }) {
+  String titled(String t) => label.isEmpty ? t : '$label: $t';
   final out = <PlannedNotification>[];
   final today = dayOf(now);
   DateTime at(DateTime d) =>
@@ -132,9 +142,9 @@ List<PlannedNotification> planNotifications({
       ];
       out.add(
         PlannedNotification(
-          1000 + i,
+          idOffset + 1000 + i,
           when,
-          tr('{n} things need you today', {'n': items.length}),
+          titled(tr('{n} things need you today', {'n': items.length})),
           parts.join(', '),
         ),
       );
@@ -143,35 +153,49 @@ List<PlannedNotification> planNotifications({
 
   if (settings.beforeEvent) {
     for (final b in bookings) {
-      final names = b.lines.map((l) => l.name).join(', ');
+      final names = b.lines.map((l) => l.label).join(', ');
       if (b.status == BookingStatus.booked) {
         final when = at(b.eventDate.subtract(Duration(days: b.remindDays)));
         if (when.isAfter(now) &&
             !dayOf(when).isAfter(today.add(Duration(days: days)))) {
           out.add(
             PlannedNotification(
-              100000 + b.id * 2,
+              idOffset + 100000 + b.id * 2,
               when,
-              tr('Send the items for #{n}', {'n': b.number}),
-              tr('{items} for {name}, event on {date}', {
-                'items': names,
-                'name': b.customerName,
-                'date': dateText(b.eventDate),
-              }),
+              titled(
+                service
+                    ? tr('Appointment coming up: #{n}', {'n': b.number})
+                    : tr('Send the items for #{n}', {'n': b.number}),
+              ),
+              service
+                  ? tr('{items} for {name} on {date}{time}', {
+                      'items': names,
+                      'name': b.customerName,
+                      'date': dateText(b.eventDate),
+                      'time': b.eventTime.isEmpty
+                          ? ''
+                          : ' ${tr('at')} ${timeText(b.eventTime)}',
+                    })
+                  : tr('{items} for {name}, event on {date}', {
+                      'items': names,
+                      'name': b.customerName,
+                      'date': dateText(b.eventDate),
+                    }),
             ),
           );
         }
       }
-      if (b.status == BookingStatus.booked ||
-          b.status == BookingStatus.pickedUp) {
+      if (!service &&
+          (b.status == BookingStatus.booked ||
+              b.status == BookingStatus.pickedUp)) {
         final when = at(b.returnDate);
         if (when.isAfter(now) &&
             !dayOf(when).isAfter(today.add(Duration(days: days)))) {
           out.add(
             PlannedNotification(
-              100000 + b.id * 2 + 1,
+              idOffset + 100000 + b.id * 2 + 1,
               when,
-              tr('Items due back today: #{n}', {'n': b.number}),
+              titled(tr('Items due back today: #{n}', {'n': b.number})),
               tr('{items} from {name}', {
                 'items': names,
                 'name': b.customerName,
@@ -257,25 +281,57 @@ class _LocalBackend implements NotificationBackend {
   }
 }
 
+/// The open bookings of another shop on the phone, for reminders.
+class ShopReminders {
+  const ShopReminders({
+    required this.name,
+    required this.service,
+    required this.bookings,
+  });
+  final String name;
+  final bool service;
+  final List<Booking> bookings;
+}
+
 class NotificationService {
   @visibleForTesting
   static NotificationBackend backend = _LocalBackend();
 
-  /// Makes the phone's waiting notifications match the bookings. Without Pro
-  /// (or with both switches off) nothing is left scheduled.
+  /// Makes the phone's waiting notifications match the bookings of every
+  /// shop. Without Pro (or with both switches off) nothing is left scheduled.
+  /// With more than one shop each title says which shop it is for.
   static Future<int> sync({
     required bool isPro,
     required NotifySettings settings,
     required List<Booking> bookings,
     DateTime? now,
+    bool service = false,
+    String shopName = '',
+    List<ShopReminders> others = const [],
   }) async {
     await backend.cancelAll();
     if (!isPro || (!settings.daily && !settings.beforeEvent)) return 0;
-    final plan = planNotifications(
-      bookings: bookings,
-      settings: settings,
-      now: now ?? DateTime.now(),
-    );
+    final at = now ?? DateTime.now();
+    final many = others.isNotEmpty;
+    final all = <PlannedNotification>[
+      ...planNotifications(
+        bookings: bookings,
+        settings: settings,
+        now: at,
+        label: many ? shopName : '',
+        service: service,
+      ),
+      for (final (i, o) in others.indexed)
+        ...planNotifications(
+          bookings: o.bookings,
+          settings: settings,
+          now: at,
+          idOffset: (i + 1) * 10000000,
+          label: o.name,
+          service: o.service,
+        ),
+    ]..sort((a, b) => a.at.compareTo(b.at));
+    final plan = all.length > notifyLimit ? all.sublist(0, notifyLimit) : all;
     for (final n in plan) {
       await backend.schedule(n);
     }
@@ -292,11 +348,34 @@ Future<void> syncNotifications(WidgetRef ref) async {
   try {
     final settings =
         ref.read(notifySettingsProvider).valueOrNull ?? await NotifySettings.load();
-    final bookings = await ref.read(bookingRepoProvider).forReminders();
+    final repo = ref.read(bookingRepoProvider);
+    final bookings = await repo.forReminders();
+    final mine = ref.read(profileProvider).valueOrNull;
+    // the other shops on the phone get their reminders too
+    final others = <ShopReminders>[];
+    for (final id in Shops.all) {
+      if (id == Shops.activeId) continue;
+      try {
+        final p = await BusinessProfile.load(shop: id);
+        if (p == null) continue;
+        others.add(
+          ShopReminders(
+            name: p.name,
+            service: p.type.isService,
+            bookings: await repo.forRemindersOf(id),
+          ),
+        );
+      } catch (_) {
+        // a shop that cannot be read is left out; the others still get theirs
+      }
+    }
     await NotificationService.sync(
       isPro: ref.read(isProProvider),
       settings: settings,
       bookings: bookings,
+      service: mine?.type.isService ?? false,
+      shopName: mine?.name ?? '',
+      others: others,
     );
   } catch (_) {
     // a notification that cannot be set must never get in the way of the app

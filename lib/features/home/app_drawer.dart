@@ -4,7 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../data/business_profile.dart';
+import '../../data/staff.dart';
 import '../../l10n/strings.dart';
+import '../security/staff_login_screen.dart' show roleLabel;
+import '../shops/shop_switcher.dart';
 import '../invoices/invoice_list_screen.dart';
 import '../reminders/reminders_screen.dart';
 import '../reports/reports_screen.dart';
@@ -23,6 +26,9 @@ class AppDrawer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final aurora = AuroraStyle.of(context);
+    final perms = ref.watch(permsProvider);
+    final me = ref.watch(sessionProvider);
+    final logo = ref.watch(logoFileProvider).valueOrNull;
 
     void go(Widget page) {
       Navigator.of(context).pop(); // close the menu
@@ -51,6 +57,22 @@ class AppDrawer extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (logo != null)
+                    Container(
+                      width: 52,
+                      height: 52,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Image.file(
+                        logo,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => const SizedBox(),
+                      ),
+                    ),
                   Text(
                     profile.name,
                     maxLines: 2,
@@ -79,23 +101,55 @@ class AppDrawer extends ConsumerWidget {
                 children: [
                   item(Icons.notifications_active_outlined, tr('Reminders'), const RemindersScreen()),
                   item(Icons.receipt_long_outlined, tr('Invoices'), const InvoiceListScreen()),
-                  item(Icons.bar_chart_rounded, tr('Reports'), const ReportsScreen()),
-                  const Divider(),
-                  item(Icons.percent_rounded, tr('Billing and GST'), const BillingSettingsScreen()),
-                  item(Icons.cloud_upload_outlined, tr('Backup and restore'), const BackupScreen()),
-                  item(Icons.account_circle_outlined, tr('Account'), const AccountScreen()),
+                  if (perms.can(Permission.seeReports))
+                    item(Icons.bar_chart_rounded, tr('Reports'), const ReportsScreen()),
                   ListTile(
-                    leading: const Icon(Icons.workspace_premium_outlined),
-                    title: const Text('GellSoft Pro'),
+                    leading: const Icon(Icons.storefront_outlined),
+                    title: Text(tr('Your shops')),
                     onTap: () {
                       Navigator.of(context).pop();
-                      showUpgradeScreen(context);
+                      showShopSwitcher(context);
                     },
                   ),
-                  item(Icons.settings_outlined, tr('Settings'), settingsPage()),
+                  if (perms.can(Permission.settings)) ...[
+                    const Divider(),
+                    item(Icons.percent_rounded, tr('Billing and GST'), const BillingSettingsScreen()),
+                    item(Icons.cloud_upload_outlined, tr('Backup and restore'), const BackupScreen()),
+                    item(Icons.account_circle_outlined, tr('Account'), const AccountScreen()),
+                    ListTile(
+                      leading: const Icon(Icons.workspace_premium_outlined),
+                      title: const Text('GellSoft Pro'),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        showUpgradeScreen(context);
+                      },
+                    ),
+                    item(Icons.settings_outlined, tr('Settings'), settingsPage()),
+                  ],
                 ],
               ),
             ),
+            // who is using the app now (staff logins); tap to sign out
+            if (me != null)
+              ListTile(
+                leading: CircleAvatar(
+                  radius: 18,
+                  child: Text(me.name.characters.first.toUpperCase()),
+                ),
+                title: Text(
+                  me.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(roleLabel(me.role)),
+                trailing: TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    ref.read(sessionProvider.notifier).logout();
+                  },
+                  child: Text(tr('Sign out')),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Text(

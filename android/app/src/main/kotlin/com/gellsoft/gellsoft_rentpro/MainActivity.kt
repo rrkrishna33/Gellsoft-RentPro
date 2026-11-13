@@ -2,6 +2,7 @@ package com.gellsoft.gellsoft_rentpro
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.core.content.FileProvider
@@ -13,6 +14,22 @@ import java.io.File
 class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // While staff logins are on, keep this app's preview out of the
+        // recent-apps list (Android 13 and later). Screenshots still work.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gellsoft/privacy")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "hideRecentsPreview" -> {
+                        val hide = call.argument<Boolean>("hide") ?: false
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            setRecentsScreenshotEnabled(!hide)
+                        }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
 
         // Sends a PDF on WhatsApp: the file is read through a FileProvider (only
         // the cache/shared folder is ever shared), WhatsApp opens on the

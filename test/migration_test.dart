@@ -188,6 +188,31 @@ void main() {
     expect((await InvoiceRepo().get(inv))!.total, 1180);
   });
 
+  test('an older file gets quantity, appointment time and the staff table', () async {
+    await makeOld(withBookingMoney: true);
+    expect(await columns('items'), contains('quantity'));
+    expect(await columns('booking_items'), contains('qty'));
+    expect(await columns('invoice_items'), contains('qty'));
+    expect(await columns('bookings'), containsAll(['event_time', 'created_by']));
+    expect(await columns('staff_users'), containsAll(['name', 'role', 'pin_hash']));
+    // what was there counts as one piece, booked one at a time
+    final item = (await ItemRepo().list()).single;
+    expect(item.quantity, 1);
+    final b = (await BookingRepo().get(1))!;
+    expect(b.lines.single.qty, 1);
+    expect(b.lines.single.label, 'Old gown');
+    expect(b.eventTime, '');
+    expect(b.createdBy, '');
+    // and the old booking still blocks its item for its days
+    final clash = await BookingRepo().conflicts(
+      itemIds: [1],
+      pickup: DateTime(2027, 3, 10),
+      ret: DateTime(2027, 3, 10),
+      now: DateTime(2027, 3, 1),
+    );
+    expect(clash.keys, [1]);
+  });
+
   test('a new install is complete at once, and the upgrade can run twice', () async {
     final d = await AppDatabase.instance.db;
     expect(await columns('bookings'), containsAll(['tax_total', 'payable']));
@@ -196,10 +221,12 @@ void main() {
     // already complete: running the upgrade again changes nothing and does not fail
     await AppDatabase.instance.migrateTo2ForTest(d);
     await AppDatabase.instance.migrateTo2ForTest(d);
-    expect(await columns('items'), containsAll(['hsn', 'gst_rate']));
+    await AppDatabase.instance.migrateTo3ForTest(d);
+    await AppDatabase.instance.migrateTo3ForTest(d);
+    expect(await columns('items'), containsAll(['hsn', 'gst_rate', 'quantity']));
   });
 
-  test('the version number moves to 2', () {
-    expect(AppDatabase.schemaVersion, 2);
+  test('the version number moves to 3', () {
+    expect(AppDatabase.schemaVersion, 3);
   });
 }

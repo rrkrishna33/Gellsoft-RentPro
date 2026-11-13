@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import 'shops.dart';
+
 /// Local SQLite database. Dates are stored as epoch milliseconds (whole days
 /// at local midnight for booking dates). The main tables carry sync columns
 /// so a cloud layer can be added later without a schema rewrite:
@@ -36,8 +38,16 @@ class AppDatabase {
     );
   }
 
-  Future<String> get filePath async =>
-      pathOverride ?? p.join(await getDatabasesPath(), 'gellsoft_rentpro.db');
+  /// The file of the shop that is open (see [Shops]).
+  Future<String> get filePath => pathFor(Shops.activeId);
+
+  /// The file of any shop. In tests the first shop is [pathOverride] and the
+  /// others sit next to it.
+  Future<String> pathFor(String shopId) async {
+    final o = pathOverride;
+    if (o != null) return shopId == Shops.mainId ? o : '$o.$shopId';
+    return p.join(await getDatabasesPath(), Shops.dbName(shopId));
+  }
 
   Future<Database> _open() async => openDatabase(
     await filePath,
@@ -51,7 +61,10 @@ class AppDatabase {
   /// bookings and their lines, and invoices. A phone that already has a
   /// version 1 file from an earlier build gets exactly what it lacks (see
   /// [_migrateTo2]); a new install is made complete at once.
-  static const schemaVersion = 2;
+  ///
+  /// 3 = quantity: how many of an item the shop has, and how many were
+  /// booked on a line; appointment time and who made a booking; staff logins.
+  static const schemaVersion = 3;
 
   /// Closes the connection; the next access reopens the file. Used by restore.
   Future<void> close() async {
@@ -73,6 +86,37 @@ class AppDatabase {
 
   Future<void> _onUpgrade(Database d, int from, int to) async {
     if (from < 2) await _migrateTo2(d);
+    if (from < 3) await _migrateTo3(d);
+  }
+
+  @visibleForTesting
+  Future<void> migrateTo3ForTest(Database d) => _migrateTo3(d);
+
+  /// Quantity, appointment time and staff logins. Existing items count as one
+  /// piece and existing lines as one booked, which is what they always were.
+  Future<void> _migrateTo3(Database d) async {
+    await _addColumn(d, 'items', 'quantity', 'INTEGER NOT NULL DEFAULT 1');
+    await _addColumn(d, 'booking_items', 'qty', 'INTEGER NOT NULL DEFAULT 1');
+    await _addColumn(d, 'invoice_items', 'qty', 'INTEGER NOT NULL DEFAULT 1');
+    await _addColumn(d, 'bookings', 'event_time', "TEXT NOT NULL DEFAULT ''");
+    await _addColumn(d, 'bookings', 'created_by', "TEXT NOT NULL DEFAULT ''");
+    await ensureStaffTable(d);
+  }
+
+  /// The people who may use the app (Admin, Staff, Cashier), each with a PIN
+  /// kept as a salted hash.
+  static Future<void> ensureStaffTable(DatabaseExecutor d) async {
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS staff_users(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        pin_hash TEXT NOT NULL,
+        pin_salt TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL
+      )''');
   }
 
   /// Adds a column unless the table already has it.
@@ -147,6 +191,7 @@ class AppDatabase {
         deposit REAL NOT NULL DEFAULT 0,
         hsn TEXT NOT NULL DEFAULT '',
         gst_rate REAL NOT NULL DEFAULT 0,
+        quantity INTEGER NOT NULL DEFAULT 1,
         notes TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'active',
         created_at INTEGER NOT NULL
@@ -187,6 +232,8 @@ class AppDatabase {
         payable REAL NOT NULL DEFAULT 0,
         notes TEXT NOT NULL DEFAULT '',
         remind_days INTEGER NOT NULL DEFAULT 2,
+        event_time TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '',
         created_at INTEGER NOT NULL
       )''');
     await d.execute(
@@ -208,6 +255,7 @@ class AppDatabase {
         item_id INTEGER NOT NULL REFERENCES items(id),
         name TEXT NOT NULL,
         rate_type TEXT NOT NULL DEFAULT 'event',
+        qty INTEGER NOT NULL DEFAULT 1,
         rate REAL NOT NULL DEFAULT 0,
         deposit REAL NOT NULL DEFAULT 0,
         amount REAL NOT NULL DEFAULT 0,
@@ -252,6 +300,7 @@ class AppDatabase {
     );
 
     await _createInvoiceTables(d);
+    await ensureStaffTable(d);
   }
 
   Future<void> _createInvoiceTables(DatabaseExecutor d) async {
@@ -307,6 +356,7 @@ class AppDatabase {
         rate_type TEXT NOT NULL DEFAULT 'event',
         rate REAL NOT NULL DEFAULT 0,
         days INTEGER NOT NULL DEFAULT 1,
+        qty INTEGER NOT NULL DEFAULT 1,
         gst_rate REAL NOT NULL DEFAULT 0,
         taxable REAL NOT NULL DEFAULT 0,
         cgst REAL NOT NULL DEFAULT 0,

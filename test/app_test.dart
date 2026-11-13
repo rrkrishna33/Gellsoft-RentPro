@@ -42,6 +42,7 @@ class _NoBookings extends BookingRepo {
     required List<int> itemIds,
     required DateTime pickup,
     required DateTime ret,
+    Map<int, int> quantities = const {},
     int? exceptBookingId,
     DateTime? now,
   }) async => const {};

@@ -30,8 +30,18 @@ String _stateName(String code) {
   return n == null ? '' : '$code - $n';
 }
 
-/// The shop's block at the top: name, address, phone, GSTIN.
-List<pw.Widget> _shopBlock(PdfTextKit kit, BusinessProfile shop, bool gst) => [
+/// The shop's block at the top: logo, name, address, phone, GSTIN.
+List<pw.Widget> _shopBlock(
+  PdfTextKit kit,
+  BusinessProfile shop,
+  bool gst, {
+  Uint8List? logo,
+}) => [
+  if (logo != null)
+    pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 6),
+      child: pw.Image(pw.MemoryImage(logo), height: 44, fit: pw.BoxFit.contain),
+    ),
   kit.text(shop.name, size: 18, bold: true, style: const pw.TextStyle(color: _accent)),
   if (shop.address.trim().isNotEmpty)
     kit.text(shop.address, size: 9, style: const pw.TextStyle(color: _soft)),
@@ -75,8 +85,13 @@ Future<Uint8List> buildInvoicePdf({
   List<Payment> payments = const [],
   double depositTotal = 0,
   double depositHeld = 0,
+
+  /// The appointment time of a service booking ("14:30"), printed with the date.
+  String eventTime = '',
 }) async {
   final kit = await PdfTextKit.load();
+  final logo = await shop.logoBytes();
+  final service = shop.type.isService;
   final inv = invoice;
   final gst = inv.gstEnabled;
   final doc = pw.Document(
@@ -85,9 +100,17 @@ Future<Uint8List> buildInvoicePdf({
     author: shop.name,
   );
 
-  final headers = gst
-      ? [tr('Item'), 'SAC/HSN', tr('Days'), tr('Rate'), tr('Taxable'), 'GST %', tr('Amount')]
-      : [tr('Item'), tr('Days'), tr('Rate'), tr('Amount')];
+  // columns: item, [SAC/HSN], quantity, [days], rate, [taxable, GST %], amount.
+  // A service bill (makeup) has no days, since nothing is taken away.
+  final headers = [
+    service ? tr('Service') : tr('Item'),
+    if (gst) 'SAC/HSN',
+    tr('Qty'),
+    if (!service) tr('Days'),
+    tr('Rate'),
+    if (gst) ...[tr('Taxable'), 'GST %'],
+    tr('Amount'),
+  ];
 
   pw.TableRow row(List<String> cells, {bool head = false, int index = 0}) => pw.TableRow(
     decoration: head
@@ -109,22 +132,15 @@ Future<Uint8List> buildInvoicePdf({
     row(headers, head: true),
     for (final (i, l) in inv.lines.indexed)
       row(
-        gst
-            ? [
-                l.name,
-                l.hsn.isEmpty ? '-' : l.hsn,
-                l.rateType == RateType.day ? '${l.days}' : '1',
-                _m(l.rate),
-                _m(l.taxable),
-                _q(l.gstRate),
-                _m(l.total),
-              ]
-            : [
-                l.name,
-                l.rateType == RateType.day ? '${l.days}' : '1',
-                _m(l.rate),
-                _m(l.total),
-              ],
+        [
+          l.name,
+          if (gst) l.hsn.isEmpty ? '-' : l.hsn,
+          '${l.qty}',
+          if (!service) l.rateType == RateType.day ? '${l.days}' : '1',
+          _m(l.rate),
+          if (gst) ...[_m(l.taxable), _q(l.gstRate)],
+          _m(l.total),
+        ],
         index: i,
       ),
   ];
@@ -154,14 +170,18 @@ Future<Uint8List> buildInvoicePdf({
             pw.Expanded(
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: _shopBlock(kit, shop, gst),
+                children: _shopBlock(kit, shop, gst, logo: logo),
               ),
             ),
             pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.end,
               children: [
                 kit.text(
-                  gst ? tr('TAX INVOICE') : tr('RENTAL BILL'),
+                  gst
+                      ? tr('TAX INVOICE')
+                      : service
+                      ? tr('BILL')
+                      : tr('RENTAL BILL'),
                   size: 16,
                   bold: true,
                   style: const pw.TextStyle(color: _accent),
@@ -204,10 +224,19 @@ Future<Uint8List> buildInvoicePdf({
             pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                kit.text(tr('Rental dates'), size: 8, style: const pw.TextStyle(color: _soft)),
-                kit.text('${tr('Pickup')}: ${dateText(inv.pickupDate)}', size: 9),
-                kit.text('${tr('Event')}: ${dateText(inv.eventDate)}', size: 9),
-                kit.text('${tr('Return')}: ${dateText(inv.returnDate)}', size: 9),
+                if (service) ...[
+                  kit.text(tr('Appointment'), size: 8, style: const pw.TextStyle(color: _soft)),
+                  kit.text(
+                    dateText(inv.eventDate) +
+                        (eventTime.isEmpty ? '' : '  $eventTime'),
+                    size: 9,
+                  ),
+                ] else ...[
+                  kit.text(tr('Rental dates'), size: 8, style: const pw.TextStyle(color: _soft)),
+                  kit.text('${tr('Pickup')}: ${dateText(inv.pickupDate)}', size: 9),
+                  kit.text('${tr('Event')}: ${dateText(inv.eventDate)}', size: 9),
+                  kit.text('${tr('Return')}: ${dateText(inv.returnDate)}', size: 9),
+                ],
               ],
             ),
           ],
@@ -218,22 +247,12 @@ Future<Uint8List> buildInvoicePdf({
             bottom: const pw.BorderSide(color: _line),
             horizontalInside: const pw.BorderSide(color: _line, width: 0.4),
           ),
-          columnWidths: gst
-              ? {
-                  0: const pw.FlexColumnWidth(3.2),
-                  1: const pw.FlexColumnWidth(1.3),
-                  2: const pw.FlexColumnWidth(0.9),
-                  3: const pw.FlexColumnWidth(1.4),
-                  4: const pw.FlexColumnWidth(1.5),
-                  5: const pw.FlexColumnWidth(0.9),
-                  6: const pw.FlexColumnWidth(1.6),
-                }
-              : {
-                  0: const pw.FlexColumnWidth(4),
-                  1: const pw.FlexColumnWidth(1),
-                  2: const pw.FlexColumnWidth(1.6),
-                  3: const pw.FlexColumnWidth(1.8),
-                },
+          columnWidths: {
+            for (var c = 0; c < headers.length; c++)
+              c: pw.FlexColumnWidth(
+                c == 0 ? (gst ? 3.0 : 4.0) : (gst && c == 1 ? 1.3 : 1.2),
+              ),
+          },
           children: body,
         ),
         pw.SizedBox(height: 10),
@@ -338,6 +357,7 @@ Future<Uint8List> buildReceiptPdf({
   required Payment payment,
 }) async {
   final kit = await PdfTextKit.load();
+  final logo = await shop.logoBytes();
   final doc = pw.Document(theme: kit.theme, title: 'Receipt #${payment.id}', author: shop.name);
   final refund = payment.kind == PaymentKind.refund;
   doc.addPage(
@@ -347,7 +367,7 @@ Future<Uint8List> buildReceiptPdf({
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          ..._shopBlock(kit, shop, false),
+          ..._shopBlock(kit, shop, false, logo: logo),
           pw.SizedBox(height: 10),
           pw.Divider(color: _line),
           pw.SizedBox(height: 6),

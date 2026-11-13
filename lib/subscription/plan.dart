@@ -30,7 +30,9 @@ enum ProFeature {
   unlimitedBookings('Unlimited bookings every month'),
   unlimitedPhotos('Unlimited photos on every booking'),
   notifications('Daily and custom reminder notifications'),
-  autoBackup('Automatic daily backup to Google Drive');
+  autoBackup('Automatic daily backup to Google Drive'),
+  multiShop('More than one shop, each kept separately'),
+  staff('Staff logins (Admin, Staff, Cashier)');
 
   /// English wording; also the translation key (see `tr`).
   final String en;

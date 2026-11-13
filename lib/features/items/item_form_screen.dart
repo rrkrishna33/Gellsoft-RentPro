@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants.dart';
+import '../../core/terms.dart';
 import '../../data/business_profile.dart';
 import '../../data/models.dart';
 import '../../data/repositories.dart';
 import '../../l10n/strings.dart';
 import '../common/widgets.dart';
 
-/// Add a new item, or change or remove an existing one.
+/// Marks "type my own category" in the category list.
+const _ownCategory = '\u0000own';
+
+/// Add a new item (or service), or change or remove an existing one.
 class ItemFormScreen extends ConsumerStatefulWidget {
   const ItemFormScreen({super.key, this.item});
 
@@ -30,6 +35,9 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
   late final _deposit = TextEditingController(
     text: widget.item == null ? '' : amountText(widget.item!.deposit),
   );
+  late final _quantity = TextEditingController(
+    text: '${widget.item?.quantity ?? 1}',
+  );
   late final _notes = TextEditingController(text: widget.item?.notes);
   late final _hsn = TextEditingController(text: widget.item?.hsn);
   late double _gst = widget.item?.gstRate ??
@@ -38,6 +46,9 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
   late RateType _rateType = widget.item?.rateType ?? RateType.event;
   late ItemStatus _status = widget.item?.status ?? ItemStatus.active;
   List<String> _used = const [];
+
+  /// true while the person is typing a category of their own.
+  bool _typing = false;
   bool _saving = false;
 
   @override
@@ -50,38 +61,63 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
 
   @override
   void dispose() {
-    for (final c in [_name, _category, _size, _rate, _deposit, _notes, _hsn]) {
+    for (final c in [
+      _name,
+      _category,
+      _size,
+      _rate,
+      _deposit,
+      _quantity,
+      _notes,
+      _hsn,
+    ]) {
       c.dispose();
     }
     super.dispose();
   }
 
-  /// Categories to offer: the ones for this kind of shop, then any the shop
-  /// has typed itself.
-  List<String> get _suggestions {
+  /// The categories in the list: the ones for this kind of shop, then any
+  /// the shop has used before, and the one this item already has.
+  List<String> get _options {
     final type = ref.read(profileProvider).valueOrNull?.type;
     final seen = <String>{};
     return [
-      for (final c in [...?type?.categories, ..._used])
+      for (final c in [
+        ...?type?.categories,
+        ..._used,
+        if (_category.text.trim().isNotEmpty && !_typing) _category.text.trim(),
+      ])
         if (seen.add(c)) c,
     ];
+  }
+
+  /// What the list shows as chosen.
+  String get _choice {
+    if (_typing) return _ownCategory;
+    final c = _category.text.trim();
+    return c.isEmpty ? '' : c;
   }
 
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     setState(() => _saving = true);
+    final service =
+        ref.read(profileProvider).valueOrNull?.type.isService ?? false;
     final old = widget.item;
+    final qty = int.tryParse(_quantity.text.trim()) ?? 1;
     final item = RentItem(
       id: old?.id,
       uuid: old?.uuid ?? '',
       name: _name.text,
       category: _category.text,
       size: _size.text,
-      rateType: _rateType,
+      // a service is charged once per booking
+      rateType: service ? RateType.event : _rateType,
       rate: parseAmount(_rate.text),
-      deposit: parseAmount(_deposit.text),
+      deposit: service ? 0 : parseAmount(_deposit.text),
       hsn: _hsn.text,
       gstRate: _gst,
+      quantity: service ? 1 : (qty < 1 ? 1 : qty),
       notes: _notes.text,
       status: _status,
       createdAt: old?.createdAt ?? DateTime.now(),
@@ -91,9 +127,10 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
   }
 
   Future<void> _remove() async {
+    final terms = ref.read(termsProvider);
     final ok = await confirmRemove(
       context,
-      title: tr('Remove this item?'),
+      title: terms.removeItemTitle,
       message: tr(
         'It will no longer be offered for new bookings. Old bookings keep it.',
       ),
@@ -106,9 +143,12 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
   @override
   Widget build(BuildContext context) {
     final editing = widget.item != null;
+    final terms = ref.watch(termsProvider);
+    final service = terms.service;
+    final options = _options;
     return Scaffold(
       appBar: AppBar(
-        title: Text(editing ? tr('Edit item') : tr('Add item')),
+        title: Text(editing ? terms.editItem : terms.addItem),
         actions: [
           if (editing)
             IconButton(
@@ -132,43 +172,97 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
             TextFormField(
               controller: _name,
               textCapitalization: TextCapitalization.words,
-              decoration: InputDecoration(labelText: tr('Item name')),
+              decoration: InputDecoration(labelText: terms.itemName),
               validator: (v) => (v == null || v.trim().isEmpty)
                   ? tr('Enter the item name')
                   : null,
             ),
             const SizedBox(height: 14),
-            TextFormField(
-              controller: _category,
-              textCapitalization: TextCapitalization.words,
+            // Pick a category from the list, or choose "Type my own" and
+            // write one.
+            DropdownButtonFormField<String>(
+              key: ValueKey('cat-$_typing-${options.length}'),
+              initialValue: options.contains(_choice) || _choice.isEmpty ||
+                      _choice == _ownCategory
+                  ? _choice
+                  : '',
+              isExpanded: true,
               decoration: InputDecoration(labelText: tr('Category')),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                for (final c in _suggestions)
-                  ActionChip(
-                    label: Text(tr(c)),
-                    onPressed: () => setState(() => _category.text = c),
+              items: [
+                DropdownMenuItem(value: '', child: Text(tr('No category'))),
+                for (final c in options)
+                  DropdownMenuItem(value: c, child: Text(tr(c))),
+                DropdownMenuItem(
+                  value: _ownCategory,
+                  child: Text(
+                    tr('Type my own category...'),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
+                ),
               ],
+              onChanged: (v) => setState(() {
+                if (v == _ownCategory) {
+                  _typing = true;
+                  _category.clear();
+                } else {
+                  _typing = false;
+                  _category.text = v ?? '';
+                }
+              }),
             ),
-            const SizedBox(height: 14),
-            TextFormField(
-              controller: _size,
-              decoration: InputDecoration(labelText: tr('Size (optional)')),
-            ),
-            const SizedBox(height: 18),
-            SegmentedButton<RateType>(
-              segments: [
-                for (final r in RateType.values)
-                  ButtonSegment(value: r, label: Text(r.label)),
-              ],
-              selected: {_rateType},
-              onSelectionChanged: (s) => setState(() => _rateType = s.first),
-            ),
+            if (_typing) ...[
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _category,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(labelText: tr('Category name')),
+              ),
+            ],
+            if (!service) ...[
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextFormField(
+                      controller: _size,
+                      decoration: InputDecoration(
+                        labelText: tr('Size (optional)'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: TextFormField(
+                      controller: _quantity,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: InputDecoration(
+                        labelText: tr('Quantity'),
+                        helperText: tr('Pieces you have'),
+                      ),
+                      validator: (v) => (int.tryParse((v ?? '').trim()) ?? 0) < 1
+                          ? tr('At least 1')
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              SegmentedButton<RateType>(
+                segments: [
+                  for (final r in RateType.values)
+                    ButtonSegment(value: r, label: Text(r.label)),
+                ],
+                selected: {_rateType},
+                onSelectionChanged: (s) => setState(() => _rateType = s.first),
+              ),
+            ],
             const SizedBox(height: 14),
             Row(
               children: [
@@ -178,25 +272,34 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    decoration: InputDecoration(labelText: tr('Rent (₹)')),
+                    decoration: InputDecoration(
+                      labelText: service
+                          ? tr('Price (₹)')
+                          : tr('Rent for one piece (₹)'),
+                    ),
                     validator: (v) => parseAmount(v ?? '') <= 0
                         ? tr('Enter the rent')
                         : null,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    controller: _deposit,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                if (!service) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _deposit,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: tr('Deposit for one piece (₹)'),
+                      ),
                     ),
-                    decoration: InputDecoration(labelText: tr('Deposit (₹)')),
                   ),
-                ),
+                ],
               ],
             ),
-            if (ref.watch(profileProvider).valueOrNull?.gstEnabled ?? false) ...[
+            if (ref.watch(profileProvider).valueOrNull?.gstEnabled ??
+                false) ...[
               const SizedBox(height: 14),
               Row(
                 children: [
@@ -207,7 +310,10 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
                       decoration: InputDecoration(labelText: tr('GST rate')),
                       items: [
                         for (final r in gstSlabs)
-                          DropdownMenuItem(value: r, child: Text('${amountText(r)}%')),
+                          DropdownMenuItem(
+                            value: r,
+                            child: Text('${amountText(r)}%'),
+                          ),
                       ],
                       onChanged: (r) => setState(() => _gst = r ?? _gst),
                     ),
@@ -219,7 +325,7 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
                         labelText: tr('SAC / HSN code'),
-                        hintText: '9973',
+                        hintText: service ? '9987' : '9973',
                       ),
                     ),
                   ),

@@ -62,6 +62,7 @@ class ItemRepo {
       'deposit': item.deposit,
       'hsn': item.hsn.trim(),
       'gst_rate': item.gstRate,
+      'quantity': item.quantity < 1 ? 1 : item.quantity,
       'notes': item.notes.trim(),
       'status': item.status.name,
       'updated_at': now,

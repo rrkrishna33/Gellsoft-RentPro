@@ -49,6 +49,10 @@ class RentItem {
 
   /// GST rate in percent charged on this item's rent.
   final double gstRate;
+
+  /// How many of this item the shop has (a shop with ten chairs has one item
+  /// "Chair" with a quantity of 10). Never less than 1.
+  final int quantity;
   final String notes;
   final ItemStatus status;
   final DateTime createdAt;
@@ -64,6 +68,7 @@ class RentItem {
     this.deposit = 0,
     this.hsn = '',
     this.gstRate = 0,
+    this.quantity = 1,
     this.notes = '',
     this.status = ItemStatus.active,
     required this.createdAt,
@@ -78,6 +83,7 @@ class RentItem {
     double? deposit,
     String? hsn,
     double? gstRate,
+    int? quantity,
     String? notes,
     ItemStatus? status,
   }) => RentItem(
@@ -91,6 +97,7 @@ class RentItem {
     deposit: deposit ?? this.deposit,
     hsn: hsn ?? this.hsn,
     gstRate: gstRate ?? this.gstRate,
+    quantity: quantity ?? this.quantity,
     notes: notes ?? this.notes,
     status: status ?? this.status,
     createdAt: createdAt,
@@ -107,6 +114,7 @@ class RentItem {
     deposit: (r['deposit'] as num?)?.toDouble() ?? 0,
     hsn: (r['hsn'] as String?) ?? '',
     gstRate: (r['gst_rate'] as num?)?.toDouble() ?? 0,
+    quantity: ((r['quantity'] as num?)?.toInt() ?? 1).clamp(1, 1 << 30),
     notes: (r['notes'] as String?) ?? '',
     status: ItemStatus.fromName(r['status'] as String?),
     createdAt: DateTime.fromMillisecondsSinceEpoch(r['created_at'] as int),

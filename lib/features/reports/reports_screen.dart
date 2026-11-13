@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../data/business_profile.dart';
 import '../../data/csv_export.dart';
 import '../../data/report_repo.dart';
+import '../../data/staff.dart';
 import '../../l10n/strings.dart';
 import '../common/widgets.dart';
 
@@ -136,11 +137,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       appBar: AppBar(
         title: Text(tr('Reports')),
         actions: [
-          IconButton(
-            tooltip: tr('Export a spreadsheet'),
-            icon: const Icon(Icons.ios_share_outlined),
-            onPressed: _export,
-          ),
+          if (ref.watch(permsProvider).can(Permission.exportData))
+            IconButton(
+              tooltip: tr('Export a spreadsheet'),
+              icon: const Icon(Icons.ios_share_outlined),
+              onPressed: _export,
+            ),
         ],
       ),
       body: AuroraBackground(
@@ -281,11 +283,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                       ),
                     ),
                   const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    onPressed: _export,
-                    icon: const Icon(Icons.ios_share_outlined),
-                    label: Text(tr('Export a spreadsheet')),
-                  ),
+                  if (ref.watch(permsProvider).can(Permission.exportData))
+                    OutlinedButton.icon(
+                      onPressed: _export,
+                      icon: const Icon(Icons.ios_share_outlined),
+                      label: Text(tr('Export a spreadsheet')),
+                    ),
                 ],
               ),
             ),

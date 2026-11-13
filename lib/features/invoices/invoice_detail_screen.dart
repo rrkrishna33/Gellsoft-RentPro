@@ -11,6 +11,7 @@ import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
 import '../../data/invoice_models.dart';
 import '../../data/invoice_repo.dart';
+import '../../data/staff.dart';
 import '../../l10n/strings.dart';
 import '../bookings/booking_detail_screen.dart';
 import '../bookings/messages.dart';
@@ -32,6 +33,7 @@ class InvoiceDetailScreen extends ConsumerWidget {
       payments: booking?.payments ?? const [],
       depositTotal: booking?.depositTotal ?? 0,
       depositHeld: booking?.depositHeld ?? 0,
+      eventTime: booking?.eventTime ?? '',
     );
   }
 
@@ -117,7 +119,8 @@ class InvoiceDetailScreen extends ConsumerWidget {
           appBar: AppBar(
             title: Text(inv.label),
             actions: [
-              if (!inv.cancelled)
+              if (!inv.cancelled &&
+                  ref.watch(permsProvider).can(Permission.cancelBookings))
                 PopupMenuButton<String>(
                   onSelected: (v) async {
                     if (v != 'cancel') return;

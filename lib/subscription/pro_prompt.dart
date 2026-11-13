@@ -66,4 +66,8 @@ String _why(ProFeature f) => switch (f) {
   ProFeature.autoBackup => tr(
     'Backing up every day without asking is part of Pro.',
   ),
+  ProFeature.multiShop => tr(
+    'Running more than one shop, each with its own data, is part of Pro.',
+  ),
+  ProFeature.staff => tr('Staff logins with their own PINs are part of Pro.'),
 };

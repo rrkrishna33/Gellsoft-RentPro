@@ -42,6 +42,7 @@ class _MemItems extends ItemRepo {
           rateType: item.rateType,
           rate: item.rate,
           deposit: item.deposit,
+          quantity: item.quantity,
           notes: item.notes,
           status: item.status,
           createdAt: item.createdAt,
@@ -124,16 +125,19 @@ Future<void> settle(WidgetTester t) async {
   }
 }
 
-Widget host(Widget child, {ItemRepo? items, CustomerRepo? customers}) =>
-    ProviderScope(
+Widget host(
+  Widget child, {
+  ItemRepo? items,
+  CustomerRepo? customers,
+  BusinessProfile shop = const BusinessProfile(
+    name: 'Shop',
+    type: ShopType.costume,
+  ),
+}) => ProviderScope(
       overrides: [
         itemRepoProvider.overrideWithValue(items ?? _MemItems()),
         customerRepoProvider.overrideWithValue(customers ?? _MemCustomers()),
-        profileProvider.overrideWith(
-          () => _FixedProfile(
-            const BusinessProfile(name: 'Shop', type: ShopType.costume),
-          ),
-        ),
+        profileProvider.overrideWith(() => _FixedProfile(shop)),
       ],
       child: MaterialApp(theme: AppTheme.light(), home: Scaffold(body: child)),
     );
@@ -172,15 +176,24 @@ void main() {
     expect(find.text('Enter the rent'), findsOneWidget);
 
     await t.enterText(find.widgetWithText(TextFormField, 'Item name'), 'Red sherwani');
-    await t.enterText(find.widgetWithText(TextFormField, 'Rent (₹)'), '2,500');
-    await t.enterText(find.widgetWithText(TextFormField, 'Deposit (₹)'), '5000');
-    // the shop type offers its categories as chips
+    await t.enterText(
+      find.widgetWithText(TextFormField, 'Rent for one piece (₹)'),
+      '2,500',
+    );
+    await t.enterText(
+      find.widgetWithText(TextFormField, 'Deposit for one piece (₹)'),
+      '5000',
+    );
+    await t.enterText(find.widgetWithText(TextFormField, 'Quantity'), '10');
+    // the shop type offers its categories in a drop-down list
     await t.scrollUntilVisible(
-      find.widgetWithText(ActionChip, 'Sherwani'),
+      find.byType(DropdownButtonFormField<String>),
       100,
       scrollable: find.byType(Scrollable).last,
     );
-    await t.tap(find.widgetWithText(ActionChip, 'Sherwani'));
+    await t.tap(find.byType(DropdownButtonFormField<String>));
+    await settle(t);
+    await t.tap(find.text('Sherwani').last);
     await settle(t);
     await t.scrollUntilVisible(
       find.text('Save'),
@@ -194,6 +207,8 @@ void main() {
     expect(repo.rows.single.rate, 2500);
     expect(repo.rows.single.deposit, 5000);
     expect(repo.rows.single.category, 'Sherwani');
+    expect(repo.rows.single.quantity, 10);
+    expect(find.textContaining('10 pieces'), findsOneWidget);
     expect(find.text('Red sherwani'), findsOneWidget);
     expect(find.textContaining('2,500'), findsOneWidget);
     expect(find.text('an event'), findsOneWidget);
@@ -223,6 +238,97 @@ void main() {
     await settle(t);
     expect(repo.rows.single.status, ItemStatus.repair);
     expect(find.text('In repair'), findsOneWidget, reason: 'shown on the tile');
+  });
+
+  testWidgets('a category can be typed instead of chosen from the list', (t) async {
+    tall(t);
+    final repo = _MemItems();
+    await t.pumpWidget(host(const ItemsScreen(), items: repo));
+    await settle(t);
+    await t.tap(find.text('Add item'));
+    await settle(t);
+    await t.enterText(find.widgetWithText(TextFormField, 'Item name'), 'Silk veil');
+    await t.enterText(
+      find.widgetWithText(TextFormField, 'Rent for one piece (₹)'),
+      '300',
+    );
+    // no text box until "type my own" is chosen
+    expect(find.widgetWithText(TextFormField, 'Category name'), findsNothing);
+    await t.scrollUntilVisible(
+      find.byType(DropdownButtonFormField<String>),
+      100,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await t.tap(find.byType(DropdownButtonFormField<String>));
+    await settle(t);
+    // the list holds this kind of shop's categories, then the typing choice
+    expect(find.text('Lehenga'), findsWidgets);
+    expect(find.text('Footwear'), findsWidgets);
+    expect(find.text('Sound system'), findsNothing,
+        reason: 'a costume shop is not offered equipment categories');
+    await t.tap(find.text('Type my own category...').last);
+    await settle(t);
+    await t.enterText(
+      find.widgetWithText(TextFormField, 'Category name'),
+      'Bridal veils',
+    );
+    await t.scrollUntilVisible(
+      find.text('Save'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await t.tap(find.text('Save'));
+    await settle(t);
+    expect(repo.rows.single.category, 'Bridal veils');
+    expect(repo.rows.single.quantity, 1, reason: 'one piece unless said');
+  });
+
+  testWidgets('a makeup artist adds services: no quantity, size or deposit', (t) async {
+    tall(t);
+    final repo = _MemItems();
+    await t.pumpWidget(
+      host(
+        const ItemsScreen(),
+        items: repo,
+        shop: const BusinessProfile(name: 'Glow', type: ShopType.makeup),
+      ),
+    );
+    await settle(t);
+    expect(find.text('Services'), findsWidgets);
+    expect(find.text('Add the services you offer, with their price.'),
+        findsOneWidget);
+    await t.tap(find.text('Add service'));
+    await settle(t);
+    expect(find.text('Service name'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, 'Quantity'), findsNothing);
+    expect(find.widgetWithText(TextFormField, 'Size (optional)'), findsNothing);
+    expect(find.widgetWithText(TextFormField, 'Deposit for one piece (₹)'),
+        findsNothing);
+    await t.enterText(find.widgetWithText(TextFormField, 'Service name'), 'Bridal makeup');
+    await t.enterText(find.widgetWithText(TextFormField, 'Price (₹)'), '15000');
+    await t.scrollUntilVisible(
+      find.byType(DropdownButtonFormField<String>),
+      100,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await t.tap(find.byType(DropdownButtonFormField<String>));
+    await settle(t);
+    await t.tap(find.text('Bridal makeup').last);
+    await settle(t);
+    await t.scrollUntilVisible(
+      find.text('Save'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await t.tap(find.text('Save'));
+    await settle(t);
+    final saved = repo.rows.single;
+    expect(saved.name, 'Bridal makeup');
+    expect(saved.category, 'Bridal makeup');
+    expect(saved.rate, 15000);
+    expect(saved.quantity, 1);
+    expect(saved.deposit, 0);
+    expect(find.text('a booking'), findsOneWidget);
   });
 
   testWidgets('removing an item asks first', (t) async {

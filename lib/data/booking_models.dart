@@ -16,6 +16,10 @@ enum BookingStatus {
 
   String get label => tr(en);
 
+  /// The wording for a service booking: finished is "Done", not "Returned".
+  String labelFor({required bool service}) =>
+      service && this == returned ? tr('Done') : tr(en);
+
   /// The items are, or will be, out of the shop: they block other bookings.
   bool get holdsItems => this == booked || this == pickedUp;
 
@@ -63,10 +67,16 @@ class BookingLine {
   final int itemId;
   final String name;
   final RateType rateType;
+
+  /// How many of the item were booked.
+  final int qty;
+
+  /// The rate and deposit of ONE piece.
   final double rate;
   final double deposit;
 
-  /// What this item came to for the booked days, before discount and tax.
+  /// What this line came to for the booked days and all [qty] pieces, before
+  /// discount and tax.
   final double amount;
   final String hsn;
   final double gstRate;
@@ -83,6 +93,7 @@ class BookingLine {
     required this.rate,
     required this.deposit,
     required this.amount,
+    this.qty = 1,
     this.hsn = '',
     this.gstRate = 0,
     double? taxable,
@@ -91,6 +102,12 @@ class BookingLine {
 
   /// What the customer pays for this item.
   double get total => ((taxable + tax) * 100).roundToDouble() / 100;
+
+  /// The deposit for all pieces on this line.
+  double get depositAmount => deposit * qty;
+
+  /// The name with the quantity when more than one: "Chair x 10".
+  String get label => qty > 1 ? '$name × $qty' : name;
 }
 
 class Payment {
@@ -159,6 +176,14 @@ class Booking {
 
   /// Days before the event to remind the owner to send the items.
   final int remindDays;
+
+  /// The appointment time ("14:30") for a service booking, or '' when the
+  /// booking has no time.
+  final String eventTime;
+
+  /// Who made the booking (the signed-in person), or '' when staff logins
+  /// are off.
+  final String createdBy;
   final DateTime createdAt;
   final List<BookingLine> lines;
   final List<Payment> payments;
@@ -183,6 +208,8 @@ class Booking {
     double? payable,
     required this.remindDays,
     required this.createdAt,
+    this.eventTime = '',
+    this.createdBy = '',
     this.lines = const [],
     this.payments = const [],
     this.photos = const [],

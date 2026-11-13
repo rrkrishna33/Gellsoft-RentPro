@@ -5,33 +5,65 @@ import '../../data/invoice_models.dart';
 import '../../data/reminders.dart';
 import '../../l10n/strings.dart';
 
-String _items(Booking b) => b.lines.map((l) => l.name).join(', ');
+String _items(Booking b) => b.lines.map((l) => l.label).join(', ');
+
+/// "02:30 PM" after the date for a booking that has a time, else ''.
+String _at(Booking b) =>
+    b.eventTime.isEmpty ? '' : ' ${tr('at')} ${timeText(b.eventTime)}';
 
 String _sign(BusinessProfile shop) => shop.phone.trim().isEmpty
     ? shop.name
     : '${shop.name}, ${shop.phone.trim()}';
 
 /// Sent to the customer when a booking is made: what, when and what is due.
-String confirmationMessage(Booking b, BusinessProfile shop) => tr(
-  'Hello {name}, your booking #{n} with {shop} is confirmed.\nItems: {items}\nPickup: {pickup}\nEvent: {event}\nReturn: {ret}\nTotal: {total}. Paid: {paid}. Balance: {balance}.\nThank you!\n{sign}',
-  {
-    'name': b.customerName,
-    'n': b.number,
-    'shop': shop.name,
-    'items': _items(b),
-    'pickup': dateText(b.pickupDate),
-    'event': dateText(b.eventDate),
-    'ret': dateText(b.returnDate),
-    'total': money(b.payable),
-    'paid': money(b.rentPaid),
-    'balance': money(b.balanceDue),
-    'sign': _sign(shop),
-  },
-);
+String confirmationMessage(Booking b, BusinessProfile shop) =>
+    shop.type.isService
+    ? tr(
+        'Hello {name}, your appointment #{n} with {shop} is confirmed.\nServices: {items}\nDate: {event}{at}\nTotal: {total}. Paid: {paid}. Balance: {balance}.\nThank you!\n{sign}',
+        {
+          'name': b.customerName,
+          'n': b.number,
+          'shop': shop.name,
+          'items': _items(b),
+          'event': dateText(b.eventDate),
+          'at': _at(b),
+          'total': money(b.payable),
+          'paid': money(b.rentPaid),
+          'balance': money(b.balanceDue),
+          'sign': _sign(shop),
+        },
+      )
+    : tr(
+        'Hello {name}, your booking #{n} with {shop} is confirmed.\nItems: {items}\nPickup: {pickup}\nEvent: {event}\nReturn: {ret}\nTotal: {total}. Paid: {paid}. Balance: {balance}.\nThank you!\n{sign}',
+        {
+          'name': b.customerName,
+          'n': b.number,
+          'shop': shop.name,
+          'items': _items(b),
+          'pickup': dateText(b.pickupDate),
+          'event': dateText(b.eventDate),
+          'ret': dateText(b.returnDate),
+          'total': money(b.payable),
+          'paid': money(b.rentPaid),
+          'balance': money(b.balanceDue),
+          'sign': _sign(shop),
+        },
+      );
 
 /// The message for a reminder of the given kind, to the customer.
 String reminderMessage(ReminderKind kind, Booking b, BusinessProfile shop) =>
     switch (kind) {
+      ReminderKind.sendItems when shop.type.isService => tr(
+        'Hello {name}, a reminder of your appointment with {shop} on {event}{at}. Balance to pay: {balance}.\n{sign}',
+        {
+          'name': b.customerName,
+          'shop': shop.name,
+          'event': dateText(b.eventDate),
+          'at': _at(b),
+          'balance': money(b.balanceDue),
+          'sign': _sign(shop),
+        },
+      ),
       ReminderKind.sendItems => tr(
         'Hello {name}, your items for the event on {event} are ready at {shop}. Please collect them on {pickup}. Balance to pay: {balance}.\n{sign}',
         {

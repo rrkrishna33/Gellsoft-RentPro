@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
+import '../../core/terms.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../data/repositories.dart';
+import '../../data/staff.dart';
 import '../../l10n/strings.dart';
 import '../common/widgets.dart';
 import 'item_form_screen.dart';
@@ -17,6 +19,8 @@ class ItemsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final items = ref.watch(itemsProvider);
     final searching = ref.watch(itemSearchProvider).trim().isNotEmpty;
+    final terms = ref.watch(termsProvider);
+    final canEdit = ref.watch(permsProvider).can(Permission.editItems);
 
     Future<void> open([RentItem? item]) async {
       await Navigator.of(context).push(
@@ -36,25 +40,28 @@ class ItemsScreen extends ConsumerWidget {
               children: [
                 Expanded(
                   child: Text(
-                    tr('Items'),
+                    terms.items,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
-                FilledButton.tonalIcon(
-                  style: FilledButton.styleFrom(minimumSize: const Size(64, 40)),
-                  onPressed: open,
-                  icon: const Icon(Icons.add),
-                  label: Text(tr('Add item')),
-                ),
+                if (canEdit)
+                  FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(64, 40),
+                    ),
+                    onPressed: open,
+                    icon: const Icon(Icons.add),
+                    label: Text(terms.addItem),
+                  ),
               ],
             ),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: SearchField(
-              hint: tr('Search items'),
+              hint: terms.searchItems,
               onChanged: (v) => ref.read(itemSearchProvider.notifier).state = v,
             ),
           ),
@@ -69,7 +76,7 @@ class ItemsScreen extends ConsumerWidget {
                     icon: Icons.checkroom_outlined,
                     message: searching
                         ? tr('No item matches your search.')
-                        : tr('Add the things you rent out, with their rate.'),
+                        : terms.noItemsYet,
                   );
                 }
                 return ListView.separated(
@@ -78,7 +85,8 @@ class ItemsScreen extends ConsumerWidget {
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (_, i) => _ItemTile(
                     item: list[i],
-                    onTap: () => open(list[i]),
+                    service: terms.service,
+                    onTap: canEdit ? () => open(list[i]) : null,
                   ),
                 );
               },
@@ -91,9 +99,14 @@ class ItemsScreen extends ConsumerWidget {
 }
 
 class _ItemTile extends StatelessWidget {
-  const _ItemTile({required this.item, required this.onTap});
+  const _ItemTile({
+    required this.item,
+    required this.onTap,
+    required this.service,
+  });
   final RentItem item;
-  final VoidCallback onTap;
+  final bool service;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -101,8 +114,14 @@ class _ItemTile extends StatelessWidget {
     final sub = [
       if (item.category.isNotEmpty) tr(item.category),
       if (item.size.isNotEmpty) item.size,
+      if (!service && item.quantity > 1)
+        tr('{n} pieces', {'n': item.quantity}),
     ].join(' · ');
-    final unit = item.rateType == RateType.day ? tr('a day') : tr('an event');
+    final unit = service
+        ? tr('a booking')
+        : item.rateType == RateType.day
+        ? tr('a day')
+        : tr('an event');
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,

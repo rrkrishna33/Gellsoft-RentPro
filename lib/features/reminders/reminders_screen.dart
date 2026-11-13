@@ -20,6 +20,8 @@ class RemindersScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(remindersProvider);
+    final service =
+        ref.watch(profileProvider).valueOrNull?.type.isService ?? false;
     return Scaffold(
       appBar: AppBar(title: Text(tr('Reminders'))),
       body: AuroraBackground(
@@ -50,7 +52,7 @@ class RemindersScreen extends ConsumerWidget {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
                         child: Text(
-                          reminderTitle(kind),
+                          reminderTitle(kind, service: service),
                           style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
@@ -79,10 +81,11 @@ const _order = [
   ReminderKind.balance,
 ];
 
-String reminderTitle(ReminderKind k) => switch (k) {
+String reminderTitle(ReminderKind k, {bool service = false}) => switch (k) {
   ReminderKind.overdue => tr('Overdue returns'),
   ReminderKind.returnDue => tr('Due back soon'),
-  ReminderKind.sendItems => tr('Send the items'),
+  ReminderKind.sendItems =>
+    service ? tr('Appointments coming up') : tr('Send the items'),
   ReminderKind.balance => tr('Money to collect'),
 };
 
@@ -105,7 +108,11 @@ class ReminderTile extends ConsumerWidget {
     final shop = ref.watch(profileProvider).valueOrNull;
     final text = Theme.of(context).textTheme;
     final days = item.daysAway(DateTime.now());
+    final service = shop?.type.isService ?? false;
     final sub = switch (item.kind) {
+      ReminderKind.sendItems when service =>
+        '${tr('Appointment')} ${whenText(days)} · ${dateText(item.date)}'
+            '${b.eventTime.isEmpty ? '' : ' · ${timeText(b.eventTime)}'}',
       ReminderKind.sendItems => '${tr('Pickup')} ${whenText(days)} · ${dateText(item.date)}',
       ReminderKind.balance => tr('Due {amount}', {'amount': money(b.balanceDue)}),
       _ => '${tr('Return')} ${whenText(days)} · ${dateText(item.date)}',

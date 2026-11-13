@@ -11,32 +11,65 @@ class AppInfo {
   static const version = '0.1.0';
 }
 
-/// What the shop rents out. It only picks the starting item categories and
-/// the wording hints; every shop can add its own categories later.
+/// What the shop does. It picks the categories offered when adding an item
+/// and, for a service business (a makeup artist), changes the wording and the
+/// booking: services instead of items, one appointment date and time, nothing
+/// to pick up or return. Every shop can still add categories of its own.
 enum ShopType {
   costume('Costume / Dress rental', [
     'Sherwani',
     'Lehenga',
     'Saree',
     'Gown',
+    'Suit and coat',
+    'Kurta and dhoti',
+    'Kids wear',
     'Jewellery',
-    'Accessories',
+    'Turban and accessories',
+    'Footwear',
   ]),
   equipment('Equipment / Tools rental', [
     'Sound system',
-    'Camera',
     'Lights',
-    'Tools',
-    'Other',
+    'Camera and video',
+    'Generator',
+    'Power tools',
+    'Construction tools',
+    'Scaffolding',
+    'Water tank and pumps',
   ]),
   decor('Party / Event decor', [
-    'Stage',
-    'Chairs and tables',
+    'Stage and backdrop',
+    'Chairs',
+    'Tables',
+    'Tents and shamiana',
     'Flowers and decor',
-    'Utensils',
-    'Other',
+    'Lighting and lamps',
+    'Utensils and crockery',
+    'Cooking vessels',
   ]),
-  vehicle('Vehicle / Bike rental', ['Bike', 'Car', 'Cycle', 'Other']),
+  vehicle('Vehicle / Bike rental', [
+    'Bike',
+    'Scooter',
+    'Car',
+    'Van and tempo',
+    'Bus',
+    'Cycle',
+  ]),
+  makeup(
+    'Makeup artist',
+    [
+      'Bridal makeup',
+      'Engagement and reception',
+      'Party makeup',
+      'Hair styling',
+      'Saree draping',
+      'Mehendi',
+      'Photoshoot makeup',
+      'Makeup trial',
+    ],
+    isService: true,
+  ),
   other('Other', ['General']);
 
   /// English name; also the translation key (see `tr`).
@@ -44,7 +77,12 @@ enum ShopType {
 
   /// Item categories offered first for this kind of shop (translation keys).
   final List<String> categories;
-  const ShopType(this.en, this.categories);
+
+  /// A business that sells its time and skill, not things that go out and
+  /// come back. Its bookings are one appointment (a date and a time) for the
+  /// services chosen.
+  final bool isService;
+  const ShopType(this.en, this.categories, {this.isService = false});
 
   String get label => tr(en);
 }

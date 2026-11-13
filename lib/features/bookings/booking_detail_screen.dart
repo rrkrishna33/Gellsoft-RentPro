@@ -6,12 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/format.dart';
 import '../../core/share.dart';
 import '../../core/whatsapp_pdf.dart';
+import '../../core/terms.dart';
 import '../../core/theme.dart';
 import '../../data/booking_models.dart';
 import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
 import '../../data/invoice_repo.dart';
 import '../../data/reminders.dart';
+import '../../data/staff.dart';
 import '../../l10n/strings.dart';
 import '../common/widgets.dart';
 import '../invoices/invoice_detail_screen.dart';
@@ -50,6 +52,9 @@ class BookingDetailScreen extends ConsumerWidget {
     final repo = ref.read(bookingRepoProvider);
     final shop = ref.watch(profileProvider).valueOrNull;
     final invoice = ref.watch(bookingInvoiceProvider(bookingId)).valueOrNull;
+    final perms = ref.watch(permsProvider);
+    final service = shop?.type.isService ?? false;
+    final terms = ref.watch(termsProvider);
 
     return async.when(
       loading: () =>
@@ -153,6 +158,7 @@ class BookingDetailScreen extends ConsumerWidget {
         }
 
         Future<void> pickUp() => _run(context, ref, () => repo.markPickedUp(b.id));
+        Future<void> done() => _run(context, ref, () => repo.markDone(b.id));
 
         Future<void> back() async {
           // the deposit is handed back as the items come in
@@ -208,15 +214,19 @@ class BookingDetailScreen extends ConsumerWidget {
           appBar: AppBar(
             title: Text('#${b.number}'),
             actions: [
-              if (active)
+              if (active &&
+                  (perms.can(Permission.book) ||
+                      perms.can(Permission.cancelBookings)))
                 PopupMenuButton<String>(
                   onSelected: (v) {
                     if (v == 'edit') edit();
                     if (v == 'cancel') cancel();
                   },
                   itemBuilder: (_) => [
-                    PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
-                    if (b.status == BookingStatus.booked)
+                    if (perms.can(Permission.book))
+                      PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
+                    if (b.status == BookingStatus.booked &&
+                        perms.can(Permission.cancelBookings))
                       PopupMenuItem(
                         value: 'cancel',
                         child: Text(tr('Cancel booking')),
@@ -229,16 +239,18 @@ class BookingDetailScreen extends ConsumerWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: [
-                _Header(booking: b),
+                _Header(booking: b, service: service),
                 const SizedBox(height: 16),
                 _Card(
-                  title: tr('Items'),
+                  title: terms.items,
                   children: [
                     for (final l in b.lines)
                       ListTile(
-                        title: Text(l.name),
+                        title: Text(l.label),
                         subtitle: Text(
-                          '${l.rateType.label} · ${money(l.rate)}',
+                          l.qty > 1
+                              ? '${l.rateType.label} · ${money(l.rate)} × ${l.qty}'
+                              : '${l.rateType.label} · ${money(l.rate)}',
                         ),
                         trailing: Text(
                           money(l.amount),
@@ -287,7 +299,9 @@ class BookingDetailScreen extends ConsumerWidget {
                         ],
                       ),
                     ),
-                    if (b.status != BookingStatus.cancelled && b.balanceDue > 0)
+                    if (perms.can(Permission.collectPayments) &&
+                        b.status != BookingStatus.cancelled &&
+                        b.balanceDue > 0)
                       _action(
                         Icons.payments_outlined,
                         tr('Take payment'),
@@ -297,13 +311,17 @@ class BookingDetailScreen extends ConsumerWidget {
                               : PaymentKind.advance,
                         ),
                       ),
-                    if (active && b.depositDue > 0)
+                    if (perms.can(Permission.collectPayments) &&
+                        active &&
+                        b.depositDue > 0)
                       _action(
                         Icons.lock_outline,
                         tr('Take deposit'),
                         () => take(PaymentKind.deposit),
                       ),
-                    if (b.depositHeld > 0 && !active)
+                    if (perms.can(Permission.collectPayments) &&
+                        b.depositHeld > 0 &&
+                        !active)
                       _action(
                         Icons.undo,
                         tr('Give deposit back'),
@@ -331,7 +349,7 @@ class BookingDetailScreen extends ConsumerWidget {
                             ),
                           ),
                         )
-                      else
+                      else if (perms.can(Permission.book))
                         _action(
                           Icons.receipt_long_outlined,
                           shop?.gstEnabled ?? false
@@ -357,7 +375,10 @@ class BookingDetailScreen extends ConsumerWidget {
                       _action(
                         Icons.notifications_active_outlined,
                         switch (remindKind()!) {
-                          ReminderKind.sendItems => tr('Remind to collect the items'),
+                          ReminderKind.sendItems =>
+                            service
+                                ? tr('Remind about the appointment')
+                                : tr('Remind to collect the items'),
                           ReminderKind.overdue => tr('Remind: items are overdue'),
                           _ => tr('Remind to return the items'),
                         },
@@ -446,13 +467,21 @@ class BookingDetailScreen extends ConsumerWidget {
                   ),
                 ],
                 const SizedBox(height: 20),
-                if (b.status == BookingStatus.booked)
-                  FilledButton.icon(
-                    onPressed: pickUp,
-                    icon: const Icon(Icons.outbox_outlined),
-                    label: Text(tr('Mark as picked up')),
-                  ),
-                if (b.status == BookingStatus.pickedUp)
+                if (b.status == BookingStatus.booked &&
+                    perms.can(Permission.book))
+                  service
+                      ? FilledButton.icon(
+                          onPressed: done,
+                          icon: const Icon(Icons.check_circle_outline),
+                          label: Text(tr('Mark as done')),
+                        )
+                      : FilledButton.icon(
+                          onPressed: pickUp,
+                          icon: const Icon(Icons.outbox_outlined),
+                          label: Text(tr('Mark as picked up')),
+                        ),
+                if (b.status == BookingStatus.pickedUp &&
+                    perms.can(Permission.book))
                   FilledButton.icon(
                     onPressed: back,
                     icon: const Icon(Icons.move_to_inbox_outlined),
@@ -524,8 +553,9 @@ class _Card extends StatelessWidget {
 
 /// The top card: customer, status and the three dates.
 class _Header extends StatelessWidget {
-  const _Header({required this.booking});
+  const _Header({required this.booking, required this.service});
   final Booking booking;
+  final bool service;
 
   @override
   Widget build(BuildContext context) {
@@ -570,7 +600,9 @@ class _Header extends StatelessWidget {
                 ),
               ),
               StatusChip(
-                label: overdue ? tr('Overdue') : b.status.label,
+                label: overdue
+                    ? tr('Overdue')
+                    : b.status.labelFor(service: service),
                 color: overdue ? const Color(0xFFFFB4AB) : Colors.white,
               ),
             ],
@@ -581,13 +613,46 @@ class _Header extends StatelessWidget {
               style: text.bodyMedium?.copyWith(color: Colors.white70),
             ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              date(tr('Pickup'), b.pickupDate),
-              date(tr('Event'), b.eventDate),
-              date(tr('Return'), b.returnDate),
-            ],
-          ),
+          if (service)
+            Row(
+              children: [
+                date(tr('Appointment'), b.eventDate),
+                if (b.eventTime.isNotEmpty)
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          tr('Time'),
+                          style: text.labelSmall?.copyWith(color: Colors.white70),
+                        ),
+                        Text(
+                          timeText(b.eventTime),
+                          style: text.bodyMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                date(tr('Pickup'), b.pickupDate),
+                date(tr('Event'), b.eventDate),
+                date(tr('Return'), b.returnDate),
+              ],
+            ),
+          if (b.createdBy.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              tr('Booked by {name}', {'name': b.createdBy}),
+              style: text.bodySmall?.copyWith(color: Colors.white70),
+            ),
+          ],
         ],
       ),
     );

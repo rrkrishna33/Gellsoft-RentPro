@@ -5,6 +5,7 @@ import '../../core/format.dart';
 import '../../core/theme.dart';
 import '../../data/booking_models.dart';
 import '../../data/booking_repo.dart';
+import '../../data/business_profile.dart';
 import '../../l10n/strings.dart';
 import '../common/widgets.dart';
 import 'booking_detail_screen.dart';
@@ -18,6 +19,13 @@ class BookingsScreen extends ConsumerWidget {
     final filter = ref.watch(bookingFilterProvider);
     final bookings = ref.watch(bookingsProvider);
     final searching = ref.watch(bookingSearchProvider).trim().isNotEmpty;
+    final service =
+        ref.watch(profileProvider).valueOrNull?.type.isService ?? false;
+    // a service business has nothing "out": upcoming, done, cancelled
+    final filters = [
+      for (final f in BookingFilter.values)
+        if (!(service && f == BookingFilter.out)) f,
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -45,11 +53,15 @@ class BookingsScreen extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              for (final f in BookingFilter.values)
+              for (final f in filters)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
-                    label: Text(tr(f.en)),
+                    label: Text(
+                      service && f == BookingFilter.returned
+                          ? tr('Done')
+                          : tr(f.en),
+                    ),
                     selected: f == filter,
                     onSelected: (_) =>
                         ref.read(bookingFilterProvider.notifier).state = f,
@@ -74,9 +86,10 @@ class BookingsScreen extends ConsumerWidget {
                             'No upcoming bookings. Tap + to make one.',
                           ),
                           BookingFilter.out => tr('Nothing is out right now.'),
-                          BookingFilter.returned => tr(
-                            'Returned bookings will appear here.',
-                          ),
+                          BookingFilter.returned =>
+                            service
+                                ? tr('Finished appointments will appear here.')
+                                : tr('Returned bookings will appear here.'),
                           BookingFilter.cancelled => tr(
                             'Cancelled bookings will appear here.',
                           ),
@@ -89,6 +102,7 @@ class BookingsScreen extends ConsumerWidget {
                 separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (_, i) => BookingTile(
                   booking: list[i],
+                  service: service,
                   onTap: () async {
                     await Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -110,9 +124,15 @@ class BookingsScreen extends ConsumerWidget {
 
 /// One booking in a list: who, when, what, and what is still due.
 class BookingTile extends StatelessWidget {
-  const BookingTile({super.key, required this.booking, required this.onTap});
+  const BookingTile({
+    super.key,
+    required this.booking,
+    required this.onTap,
+    this.service = false,
+  });
   final Booking booking;
   final VoidCallback onTap;
+  final bool service;
 
   @override
   Widget build(BuildContext context) {
@@ -120,7 +140,7 @@ class BookingTile extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final today = dayOf(DateTime.now());
     final overdue = b.isOverdue(today);
-    final names = b.lines.map((l) => l.name).toList();
+    final names = b.lines.map((l) => l.label).toList();
     final what = names.isEmpty
         ? ''
         : names.length == 1
@@ -161,7 +181,7 @@ class BookingTile extends StatelessWidget {
                       StatusChip(label: tr('Overdue'), color: Palette.danger)
                     else
                       StatusChip(
-                        label: b.status.label,
+                        label: b.status.labelFor(service: service),
                         color: switch (b.status) {
                           BookingStatus.booked => Theme.of(context).colorScheme.primary,
                           BookingStatus.pickedUp => Palette.warning,
@@ -176,10 +196,18 @@ class BookingTile extends StatelessWidget {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    const Icon(Icons.celebration_outlined, size: 16),
+                    Icon(
+                      service
+                          ? Icons.event_available_outlined
+                          : Icons.celebration_outlined,
+                      size: 16,
+                    ),
                     const SizedBox(width: 6),
                     Text(
-                      dateText(b.eventDate),
+                      dateText(b.eventDate) +
+                          (b.eventTime.isEmpty
+                              ? ''
+                              : ' · ${timeText(b.eventTime)}'),
                       style: text.bodySmall?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),

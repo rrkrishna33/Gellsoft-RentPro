@@ -1,8 +1,13 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/booking_math.dart';
 import '../core/constants.dart';
+import 'photo_store.dart';
+import 'shops.dart';
 
 /// The shop: its name, what it rents and how to reach it. Shown on receipts
 /// and invoices, together with its GST details.
@@ -37,6 +42,10 @@ class BusinessProfile {
   /// A line at the bottom of every invoice (terms, thanks).
   final String invoiceFooter;
 
+  /// File name of the shop's logo in the app's own folder, or '' for none.
+  /// Only the name is kept (the folder differs between phones).
+  final String logoName;
+
   const BusinessProfile({
     required this.name,
     required this.type,
@@ -50,6 +59,7 @@ class BusinessProfile {
     this.defaultGstRate = 18,
     this.invoicePrefix = 'RNT',
     this.invoiceFooter = '',
+    this.logoName = '',
   });
 
   GstConfig get gst => GstConfig(enabled: gstEnabled, inclusive: taxInclusive);
@@ -67,6 +77,7 @@ class BusinessProfile {
     double? defaultGstRate,
     String? invoicePrefix,
     String? invoiceFooter,
+    String? logoName,
   }) => BusinessProfile(
     name: name ?? this.name,
     type: type ?? this.type,
@@ -80,44 +91,67 @@ class BusinessProfile {
     defaultGstRate: defaultGstRate ?? this.defaultGstRate,
     invoicePrefix: invoicePrefix ?? this.invoicePrefix,
     invoiceFooter: invoiceFooter ?? this.invoiceFooter,
+    logoName: logoName ?? this.logoName,
   );
 
-  Future<void> save() async {
-    final sp = await SharedPreferences.getInstance();
-    await sp.setString('b_name', name);
-    await sp.setString('b_type', type.name);
-    await sp.setString('b_phone', phone);
-    await sp.setString('b_address', address);
-    await sp.setInt('b_remind', remindDays);
-    await sp.setBool('b_gst', gstEnabled);
-    await sp.setBool('b_incl', taxInclusive);
-    await sp.setString('b_gstin', gstin);
-    await sp.setString('b_state', stateCode);
-    await sp.setDouble('b_gstrate', defaultGstRate);
-    await sp.setString('b_prefix', invoicePrefix);
-    await sp.setString('b_footer', invoiceFooter);
+  /// The logo file, when the shop has one and it is still on the phone.
+  Future<File?> logoFile() async {
+    if (logoName.isEmpty) return null;
+    final f = File(await PhotoStore.pathOf(logoName));
+    return await f.exists() ? f : null;
   }
 
-  static Future<BusinessProfile?> load() async {
+  Future<Uint8List?> logoBytes() async {
+    try {
+      return await (await logoFile())?.readAsBytes();
+    } catch (_) {
+      return null; // a missing logo must never stop an invoice
+    }
+  }
+
+  /// Saves the details of a shop (the open one unless [shop] is given).
+  Future<void> save({String? shop}) async {
     final sp = await SharedPreferences.getInstance();
-    final name = sp.getString('b_name');
+    String k(String n) => Shops.key('b', n, shop: shop);
+    await sp.setString(k('name'), name);
+    await sp.setString(k('type'), type.name);
+    await sp.setString(k('phone'), phone);
+    await sp.setString(k('address'), address);
+    await sp.setInt(k('remind'), remindDays);
+    await sp.setBool(k('gst'), gstEnabled);
+    await sp.setBool(k('incl'), taxInclusive);
+    await sp.setString(k('gstin'), gstin);
+    await sp.setString(k('state'), stateCode);
+    await sp.setDouble(k('gstrate'), defaultGstRate);
+    await sp.setString(k('prefix'), invoicePrefix);
+    await sp.setString(k('footer'), invoiceFooter);
+    await sp.setString(k('logo'), logoName);
+  }
+
+  /// The details of a shop (the open one unless [shop] is given), or null
+  /// when it has none yet.
+  static Future<BusinessProfile?> load({String? shop}) async {
+    final sp = await SharedPreferences.getInstance();
+    String k(String n) => Shops.key('b', n, shop: shop);
+    final name = sp.getString(k('name'));
     if (name == null) return null;
     return BusinessProfile(
       name: name,
       type: ShopType.values.firstWhere(
-        (t) => t.name == sp.getString('b_type'),
+        (t) => t.name == sp.getString(k('type')),
         orElse: () => ShopType.other,
       ),
-      phone: sp.getString('b_phone') ?? '',
-      address: sp.getString('b_address') ?? '',
-      remindDays: sp.getInt('b_remind') ?? 2,
-      gstEnabled: sp.getBool('b_gst') ?? false,
-      taxInclusive: sp.getBool('b_incl') ?? false,
-      gstin: sp.getString('b_gstin') ?? '',
-      stateCode: sp.getString('b_state') ?? '',
-      defaultGstRate: sp.getDouble('b_gstrate') ?? 18,
-      invoicePrefix: sp.getString('b_prefix') ?? 'RNT',
-      invoiceFooter: sp.getString('b_footer') ?? '',
+      phone: sp.getString(k('phone')) ?? '',
+      address: sp.getString(k('address')) ?? '',
+      remindDays: sp.getInt(k('remind')) ?? 2,
+      gstEnabled: sp.getBool(k('gst')) ?? false,
+      taxInclusive: sp.getBool(k('incl')) ?? false,
+      gstin: sp.getString(k('gstin')) ?? '',
+      stateCode: sp.getString(k('state')) ?? '',
+      defaultGstRate: sp.getDouble(k('gstrate')) ?? 18,
+      invoicePrefix: sp.getString(k('prefix')) ?? 'RNT',
+      invoiceFooter: sp.getString(k('footer')) ?? '',
+      logoName: sp.getString(k('logo')) ?? '',
     );
   }
 }
@@ -131,6 +165,27 @@ class ProfileNotifier extends AsyncNotifier<BusinessProfile?> {
     state = AsyncData(p);
   }
 }
+
+/// The details of all the shops on this phone, by shop id (for the switcher).
+/// A shop that has no details yet is left out.
+final shopNamesProvider = FutureProvider<Map<String, BusinessProfile>>((
+  ref,
+) async {
+  // reread when the open shop's details change
+  ref.watch(profileProvider);
+  final out = <String, BusinessProfile>{};
+  for (final id in Shops.all) {
+    final p = await BusinessProfile.load(shop: id);
+    if (p != null) out[id] = p;
+  }
+  return out;
+});
+
+/// The open shop's logo file, or null.
+final logoFileProvider = FutureProvider<File?>((ref) async {
+  final p = ref.watch(profileProvider).valueOrNull;
+  return p?.logoFile();
+});
 
 final profileProvider =
     AsyncNotifierProvider<ProfileNotifier, BusinessProfile?>(

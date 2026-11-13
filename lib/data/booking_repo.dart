@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -9,6 +11,7 @@ import 'booking_models.dart';
 import 'database.dart';
 import 'models.dart';
 import 'reminders.dart';
+import 'shops.dart';
 
 /// Why a booking could not be saved or changed.
 enum BookingError {
@@ -17,6 +20,9 @@ enum BookingError {
 
   /// An item is already booked for some of these days.
   itemBusy,
+
+  /// An item has some free pieces on these days, but not as many as wanted.
+  notEnough,
 
   /// Pickup, event and return are not in order.
   badDates,
@@ -55,9 +61,18 @@ class BookingDraft {
   final DateTime pickupDate;
   final DateTime returnDate;
   final List<int> itemIds;
+
+  /// How many of each item (item id -> pieces). An item not listed is one.
+  final Map<int, int> quantities;
   final double discount;
   final String notes;
   final int remindDays;
+
+  /// The appointment time ("14:30") of a service booking, or ''.
+  final String eventTime;
+
+  /// Who is making the booking, or '' when staff logins are off.
+  final String createdBy;
 
   const BookingDraft({
     required this.customerId,
@@ -65,13 +80,21 @@ class BookingDraft {
     required this.pickupDate,
     required this.returnDate,
     required this.itemIds,
+    this.quantities = const {},
     this.discount = 0,
     this.notes = '',
     this.remindDays = 2,
+    this.eventTime = '',
+    this.createdBy = '',
   });
+
+  int qtyOf(int itemId) {
+    final q = quantities[itemId] ?? 1;
+    return q < 1 ? 1 : q;
+  }
 }
 
-/// An item that is already taken for the days asked about.
+/// An item that does not have enough free pieces for the days asked about.
 class ItemConflict {
   final int itemId;
   final int bookingId;
@@ -80,6 +103,11 @@ class ItemConflict {
   final DateTime pickupDate;
   final DateTime returnDate;
 
+  /// How many pieces the shop has, and how many of them are free on every
+  /// one of the days asked about.
+  final int stock;
+  final int free;
+
   const ItemConflict({
     required this.itemId,
     required this.bookingId,
@@ -87,7 +115,27 @@ class ItemConflict {
     required this.customerName,
     required this.pickupDate,
     required this.returnDate,
+    this.stock = 1,
+    this.free = 0,
   });
+}
+
+/// How many pieces of an item are free for some days, and who has the rest.
+class ItemAvailability {
+  const ItemAvailability({
+    required this.itemId,
+    required this.stock,
+    required this.free,
+    this.holder,
+  });
+  final int itemId;
+  final int stock;
+
+  /// Free on every one of the days (never negative).
+  final int free;
+
+  /// A booking that has some of the pieces on those days, if any.
+  final ItemConflict? holder;
 }
 
 /// Which bookings the list shows.
@@ -158,6 +206,25 @@ class BookingRepo {
   /// returned bookings that still have rent to collect.
   Future<List<Booking>> forReminders() async {
     final d = await AppDatabase.instance.db;
+    return _remindersIn(d);
+  }
+
+  /// The same for any shop on the phone, so reminders cover every shop, not
+  /// only the one that is open. A shop that is not open is read on a
+  /// connection of its own; one with no data yet has none.
+  Future<List<Booking>> forRemindersOf(String shopId) async {
+    if (shopId == Shops.activeId) return forReminders();
+    final path = await AppDatabase.instance.pathFor(shopId);
+    if (!File(path).existsSync()) return const [];
+    final db = await openDatabase(path, readOnly: true, singleInstance: false);
+    try {
+      return await _remindersIn(db);
+    } finally {
+      await db.close();
+    }
+  }
+
+  Future<List<Booking>> _remindersIn(DatabaseExecutor d) async {
     final rows = await d.rawQuery('''
       SELECT b.*, c.name AS c_name, c.phone AS c_phone
       FROM bookings b JOIN customers c ON c.id = b.customer_id
@@ -234,6 +301,8 @@ class BookingRepo {
           payable: (r['payable'] as num).toDouble(),
           notes: (r['notes'] as String?) ?? '',
           remindDays: (r['remind_days'] as int?) ?? 2,
+          eventTime: (r['event_time'] as String?) ?? '',
+          createdBy: (r['created_by'] as String?) ?? '',
           createdAt: DateTime.fromMillisecondsSinceEpoch(
             r['created_at'] as int,
           ),
@@ -244,6 +313,7 @@ class BookingRepo {
               itemId: l['item_id'] as int,
               name: l['name'] as String,
               rateType: RateType.fromName(l['rate_type'] as String?),
+              qty: ((l['qty'] as num?)?.toInt() ?? 1).clamp(1, 1 << 30),
               rate: (l['rate'] as num).toDouble(),
               deposit: (l['deposit'] as num).toDouble(),
               amount: (l['amount'] as num).toDouble(),
@@ -310,10 +380,26 @@ class BookingRepo {
     return left < 0 ? 0 : left;
   }
 
-  /// The items among [itemIds] that are taken for any day from [pickup] to
-  /// [ret]. An item whose booking is out and late stays taken until it is
-  /// brought back. [exceptBookingId] leaves one booking out, for editing it.
+  /// The items among [itemIds] that do not have enough free pieces for any day
+  /// from [pickup] to [ret]. [quantities] says how many of each are wanted
+  /// (one when not listed). A booking that is out and late keeps its pieces
+  /// until they are brought back. [exceptBookingId] leaves one booking out, for
+  /// editing it.
   Future<Map<int, ItemConflict>> conflicts({
+    required List<int> itemIds,
+    required DateTime pickup,
+    required DateTime ret,
+    Map<int, int> quantities = const {},
+    int? exceptBookingId,
+    DateTime? now,
+  }) async {
+    final d = await AppDatabase.instance.db;
+    return _conflicts(d, itemIds, quantities, pickup, ret, exceptBookingId, now);
+  }
+
+  /// For each of [itemIds]: how many pieces the shop has and how many are free
+  /// on every day from [pickup] to [ret].
+  Future<Map<int, ItemAvailability>> availability({
     required List<int> itemIds,
     required DateTime pickup,
     required DateTime ret,
@@ -321,10 +407,46 @@ class BookingRepo {
     DateTime? now,
   }) async {
     final d = await AppDatabase.instance.db;
-    return _conflicts(d, itemIds, pickup, ret, exceptBookingId, now);
+    return _availability(d, itemIds, pickup, ret, exceptBookingId, now);
   }
 
   Future<Map<int, ItemConflict>> _conflicts(
+    DatabaseExecutor d,
+    List<int> itemIds,
+    Map<int, int> quantities,
+    DateTime pickup,
+    DateTime ret,
+    int? exceptBookingId,
+    DateTime? now,
+  ) async {
+    final avail = await _availability(
+      d,
+      itemIds,
+      pickup,
+      ret,
+      exceptBookingId,
+      now,
+    );
+    final out = <int, ItemConflict>{};
+    for (final a in avail.values) {
+      final wanted = (quantities[a.itemId] ?? 1).clamp(1, 1 << 30);
+      if (wanted <= a.free) continue;
+      final h = a.holder;
+      out[a.itemId] = ItemConflict(
+        itemId: a.itemId,
+        bookingId: h?.bookingId ?? 0,
+        bookingNumber: h?.bookingNumber ?? 0,
+        customerName: h?.customerName ?? '',
+        pickupDate: h?.pickupDate ?? pickup,
+        returnDate: h?.returnDate ?? ret,
+        stock: a.stock,
+        free: a.free,
+      );
+    }
+    return out;
+  }
+
+  Future<Map<int, ItemAvailability>> _availability(
     DatabaseExecutor d,
     List<int> itemIds,
     DateTime pickup,
@@ -335,8 +457,16 @@ class BookingRepo {
     if (itemIds.isEmpty) return const {};
     final today = dayOf(now ?? DateTime.now());
     final marks = List.filled(itemIds.length, '?').join(',');
+    final stockRows = await d.rawQuery(
+      'SELECT id, quantity FROM items WHERE id IN ($marks)',
+      itemIds,
+    );
+    final stock = {
+      for (final r in stockRows)
+        r['id'] as int: ((r['quantity'] as num?)?.toInt() ?? 1).clamp(1, 1 << 30),
+    };
     final rows = await d.rawQuery('''
-      SELECT bi.item_id, b.id AS booking_id, b.number, b.pickup_date,
+      SELECT bi.item_id, bi.qty, b.id AS booking_id, b.number, b.pickup_date,
              b.return_date, b.status, c.name AS c_name
       FROM booking_items bi
       JOIN bookings b ON b.id = bi.booking_id
@@ -344,25 +474,71 @@ class BookingRepo {
       WHERE b.deleted = 0 AND b.status IN ('booked', 'picked_up')
         AND bi.item_id IN ($marks)
     ''', itemIds);
-    final out = <int, ItemConflict>{};
+    // the bookings that share a day with the dates asked about, per item
+    final overlaps = <int, List<({DateTime from, DateTime to, int qty, ItemConflict who})>>{};
     for (final r in rows) {
       final bookingId = r['booking_id'] as int;
       if (bookingId == exceptBookingId) continue;
       final from = _day(r['pickup_date']);
       var to = _day(r['return_date']);
-      // still out and late: it is not back, so it is taken until it is
+      // still out and late: it is not back, so it is held until it is
       if (r['status'] == 'picked_up' && to.isBefore(today)) to = today;
       if (!rangesOverlap(pickup, ret, from, to)) continue;
-      out.putIfAbsent(
-        r['item_id'] as int,
-        () => ItemConflict(
-          itemId: r['item_id'] as int,
+      final id = r['item_id'] as int;
+      overlaps.putIfAbsent(id, () => []).add((
+        from: from,
+        to: to,
+        qty: ((r['qty'] as num?)?.toInt() ?? 1).clamp(1, 1 << 30),
+        who: ItemConflict(
+          itemId: id,
           bookingId: bookingId,
           bookingNumber: r['number'] as int,
           customerName: r['c_name'] as String,
           pickupDate: from,
           returnDate: to,
         ),
+      ));
+    }
+    final p0 = dayOf(pickup), r0 = dayOf(ret);
+    final out = <int, ItemAvailability>{};
+    for (final id in itemIds) {
+      final have = stock[id] ?? 1;
+      final list = overlaps[id] ?? const [];
+      // The most pieces held on any single day is found on the first day or
+      // on a day some booking starts, so only those days need counting.
+      final days = <DateTime>{
+        p0,
+        for (final o in list)
+          if (!o.from.isBefore(p0) && !o.from.isAfter(r0)) o.from,
+      };
+      var peak = 0;
+      for (final day in days) {
+        var used = 0;
+        for (final o in list) {
+          if (!day.isBefore(o.from) && !day.isAfter(o.to)) used += o.qty;
+        }
+        if (used > peak) peak = used;
+      }
+      final free = have - peak < 0 ? 0 : have - peak;
+      ItemConflict? holder;
+      if (list.isNotEmpty) {
+        final first = list.first.who;
+        holder = ItemConflict(
+          itemId: id,
+          bookingId: first.bookingId,
+          bookingNumber: first.bookingNumber,
+          customerName: first.customerName,
+          pickupDate: first.pickupDate,
+          returnDate: first.returnDate,
+          stock: have,
+          free: free,
+        );
+      }
+      out[id] = ItemAvailability(
+        itemId: id,
+        stock: have,
+        free: free,
+        holder: holder,
       );
     }
     return out;
@@ -378,6 +554,7 @@ class BookingRepo {
     double advance = 0,
     PayMode advanceMode = PayMode.cash,
     GstConfig gst = GstConfig.off,
+    bool checkAvailability = true,
     DateTime? now,
   }) async {
     final d = await AppDatabase.instance.db;
@@ -386,7 +563,7 @@ class BookingRepo {
       if (!isPro && await _createdInMonth(txn, at) >= FreePlan.bookingsPerMonth) {
         throw const BookingException(BookingError.limitReached);
       }
-      final p = await _prepare(txn, draft, null, at, gst);
+      final p = await _prepare(txn, draft, null, at, gst, checkAvailability);
       if (advance < 0 || advance > p.payable + 0.005) {
         throw const BookingException(BookingError.badAmount);
       }
@@ -412,6 +589,8 @@ class BookingRepo {
         'payable': p.payable,
         'notes': draft.notes.trim(),
         'remind_days': draft.remindDays,
+        'event_time': draft.eventTime,
+        'created_by': draft.createdBy.trim(),
         'created_at': ms,
       });
       await _insertLines(txn, id, p.lines);
@@ -435,6 +614,7 @@ class BookingRepo {
     int id,
     BookingDraft draft, {
     GstConfig gst = GstConfig.off,
+    bool checkAvailability = true,
     DateTime? now,
   }) async {
     final d = await AppDatabase.instance.db;
@@ -444,7 +624,7 @@ class BookingRepo {
       if (!cur.holdsItems) {
         throw const BookingException(BookingError.badState);
       }
-      final p = await _prepare(txn, draft, id, at, gst);
+      final p = await _prepare(txn, draft, id, at, gst, checkAvailability);
       await txn.update(
         'bookings',
         {
@@ -459,6 +639,7 @@ class BookingRepo {
           'payable': p.payable,
           'notes': draft.notes.trim(),
           'remind_days': draft.remindDays,
+          'event_time': draft.eventTime,
           'updated_at': at.millisecondsSinceEpoch,
         },
         where: 'id = ?',
@@ -494,6 +675,7 @@ class BookingRepo {
     int? exceptBookingId,
     DateTime now,
     GstConfig gst,
+    bool checkAvailability,
   ) async {
     final pickup = dayOf(draft.pickupDate);
     final event = dayOf(draft.eventDate);
@@ -525,12 +707,14 @@ class BookingRepo {
       }
       final type = RateType.fromName(r['rate_type'] as String?);
       final rate = (r['rate'] as num).toDouble();
-      amounts.add(lineAmount(type, rate, pickup, ret));
+      final qty = draft.qtyOf(id);
+      amounts.add(r2(lineAmount(type, rate, pickup, ret) * qty));
       rates.add((r['gst_rate'] as num?)?.toDouble() ?? 0);
       base.add({
         'item_id': id,
         'name': r['name'],
         'rate_type': type.name,
+        'qty': qty,
         'rate': rate,
         'deposit': (r['deposit'] as num).toDouble(),
         'hsn': (r['hsn'] as String?) ?? '',
@@ -554,18 +738,35 @@ class BookingRepo {
           'tax': money[i].tax,
         },
     ];
-    final clash = await _conflicts(d, ids, pickup, ret, exceptBookingId, now);
+    final clash = checkAvailability
+        ? await _conflicts(
+            d,
+            ids,
+            draft.quantities,
+            pickup,
+            ret,
+            exceptBookingId,
+            now,
+          )
+        : const <int, ItemConflict>{};
     if (clash.isNotEmpty) {
       final first = clash.values.first;
+      final name = byId[first.itemId]!['name'] as String;
+      final pieces = first.stock > 1 || draft.qtyOf(first.itemId) > 1;
       throw BookingException(
-        BookingError.itemBusy,
-        byId[first.itemId]!['name'] as String,
+        pieces ? BookingError.notEnough : BookingError.itemBusy,
+        name,
       );
     }
     return _Prepared(
       lines: lines,
       rent: rent,
-      deposit: r2(base.fold(0.0, (a, l) => a + (l['deposit']! as double))),
+      deposit: r2(
+        base.fold(
+          0.0,
+          (a, l) => a + (l['deposit']! as double) * (l['qty']! as int),
+        ),
+      ),
       tax: r2(money.fold(0.0, (a, m) => a + m.tax)),
       payable: r2(money.fold(0.0, (a, m) => a + m.total)),
     );
@@ -588,6 +789,11 @@ class BookingRepo {
   /// The items come back. Only a picked-up booking can be returned.
   Future<void> markReturned(int id, {DateTime? now}) =>
       _move(id, BookingStatus.pickedUp, BookingStatus.returned, now);
+
+  /// A service booking (makeup) is finished: it goes straight from booked to
+  /// done, because nothing was picked up or brought back.
+  Future<void> markDone(int id, {DateTime? now}) =>
+      _move(id, BookingStatus.booked, BookingStatus.returned, now);
 
   /// Calls the booking off. Only a booking whose items have not gone out can
   /// be cancelled.
