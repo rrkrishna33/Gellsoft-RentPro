@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/app_update.dart';
 import 'core/constants.dart';
 import 'core/restart_widget.dart';
 import 'core/theme.dart';
@@ -41,6 +42,8 @@ class _GellsoftRentProAppState extends ConsumerState<GellsoftRentProApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // asks Google Play whether a newer version is out; never blocks the app
+    AppUpdate.check();
     Future.delayed(const Duration(milliseconds: 1200), () {
       if (mounted) setState(() => _minSplashDone = true);
     });
@@ -67,6 +70,7 @@ class _GellsoftRentProAppState extends ConsumerState<GellsoftRentProApp>
     final language = AppLanguage.fromCode(settings?.language);
     Lang.current = language;
     return MaterialApp(
+      scaffoldMessengerKey: AppUpdate.messengerKey,
       title: AppInfo.appName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),

@@ -1,7 +1,7 @@
-﻿name: gellsoft_rentpro
+name: gellsoft_rentpro
 description: GellSoft RentPro - bookings and rent management for rental shops.
 publish_to: "none"
-version: 0.2.0+6
+version: 0.2.0+7
 
 environment:
   sdk: ^3.13.7
@@ -29,6 +29,7 @@ dependencies:
   in_app_purchase: ^3.3.1
   in_app_purchase_android: ^0.5.5
   google_sign_in: ^7.2.0
+  in_app_update: ^5.0.0
 
 dev_dependencies:
   flutter_test:

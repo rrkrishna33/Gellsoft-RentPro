@@ -661,4 +661,7 @@ const taStrings = <String, String>{
   'Add a reminder time': 'நினைவூட்டல் நேரத்தைச் சேர்',
   'Be reminded more than once a day, up to {n} times': 'ஒரு நாளில் ஒன்றுக்கு மேற்பட்ட முறை நினைவூட்டல் பெறுங்கள், அதிகபட்சம் {n} முறை',
   'Several reminder times a day': 'ஒரு நாளில் பல நினைவூட்டல் நேரங்கள்',
+  // ---- app update
+  'Update downloaded': 'புதிய பதிப்பு பதிவிறக்கப்பட்டது',
+  'Restart': 'மீண்டும் தொடங்கு',
 };
