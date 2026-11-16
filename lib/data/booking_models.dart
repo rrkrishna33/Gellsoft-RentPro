@@ -5,6 +5,7 @@ import 'models.dart';
 enum BookingStatus {
   booked('booked', 'Booked'),
   pickedUp('picked_up', 'Picked up'),
+  dispatched('dispatched', 'Dispatched'),
   returned('returned', 'Returned'),
   cancelled('cancelled', 'Cancelled');
 
@@ -21,7 +22,11 @@ enum BookingStatus {
       service && this == returned ? tr('Done') : tr(en);
 
   /// The items are, or will be, out of the shop: they block other bookings.
-  bool get holdsItems => this == booked || this == pickedUp;
+  bool get holdsItems => this == booked || this == pickedUp || this == dispatched;
+
+  /// The items have left the shop (collected, or sent by courier) and are not
+  /// back yet.
+  bool get isOut => this == pickedUp || this == dispatched;
 
   static BookingStatus fromDb(String? v) =>
       values.firstWhere((s) => s.db == v, orElse: () => BookingStatus.booked);
@@ -130,6 +135,44 @@ class Payment {
   });
 }
 
+/// Why extra money was added to a booking.
+enum ChargeKind {
+  late('Late return'),
+  damage('Damage');
+
+  final String en;
+  const ChargeKind(this.en);
+
+  String get label => tr(en);
+
+  static ChargeKind fromName(String? v) =>
+      values.firstWhere((k) => k.name == v, orElse: () => ChargeKind.damage);
+}
+
+/// How a charge reads on an invoice: "Late return (2 days late)".
+String chargeLineName(ChargeKind kind, String note) =>
+    note.trim().isEmpty ? kind.label : '${kind.label} (${note.trim()})';
+
+/// A late-return or damage charge on a booking. It is part of what the
+/// customer pays (and is not taxed).
+class BookingCharge {
+  final int id;
+  final int bookingId;
+  final ChargeKind kind;
+  final double amount;
+  final String note;
+  final DateTime createdAt;
+
+  const BookingCharge({
+    required this.id,
+    required this.bookingId,
+    required this.kind,
+    required this.amount,
+    required this.note,
+    required this.createdAt,
+  });
+}
+
 class BookingPhoto {
   final int id;
   final int bookingId;
@@ -189,6 +232,18 @@ class Booking {
   final List<Payment> payments;
   final List<BookingPhoto> photos;
 
+  /// Late-return and damage charges. Their total is already inside
+  /// [payable].
+  final List<BookingCharge> charges;
+
+  /// Set when the items were sent by courier: who carried them and the
+  /// tracking number. Both are optional, so either can be ''.
+  final String courierName;
+  final String courierNo;
+
+  /// When the booking was marked dispatched, or null.
+  final DateTime? dispatchedAt;
+
   const Booking({
     required this.id,
     required this.uuid,
@@ -213,12 +268,20 @@ class Booking {
     this.lines = const [],
     this.payments = const [],
     this.photos = const [],
+    this.charges = const [],
+    this.courierName = '',
+    this.courierNo = '',
+    this.dispatchedAt,
   }) : payable = payable ?? rentTotal - discount;
 
   double _sum(bool Function(Payment) test) =>
       payments.where(test).fold(0.0, (a, p) => a + p.amount);
 
-  /// What the customer owes for the rent (after discount, with GST).
+  /// Late-return and damage charges added to this booking.
+  double get chargesTotal => charges.fold(0.0, (a, c) => a + c.amount);
+
+  /// What the customer owes for the rent (after discount, with GST), plus any
+  /// charges.
   double get rentNet => payable;
 
   /// Rent paid so far (advance and balance).
@@ -246,6 +309,5 @@ class Booking {
   }
 
   /// The items should be back by now but are still out.
-  bool isOverdue(DateTime today) =>
-      status == BookingStatus.pickedUp && returnDate.isBefore(today);
+  bool isOverdue(DateTime today) => status.isOut && returnDate.isBefore(today);
 }

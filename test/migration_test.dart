@@ -223,10 +223,22 @@ void main() {
     await AppDatabase.instance.migrateTo2ForTest(d);
     await AppDatabase.instance.migrateTo3ForTest(d);
     await AppDatabase.instance.migrateTo3ForTest(d);
+    await AppDatabase.instance.migrateTo4ForTest(d);
+    await AppDatabase.instance.migrateTo4ForTest(d);
+    await AppDatabase.instance.migrateTo5ForTest(d);
+    await AppDatabase.instance.migrateTo5ForTest(d);
+    await AppDatabase.instance.migrateTo6ForTest(d);
+    await AppDatabase.instance.migrateTo6ForTest(d);
+    expect(await columns('item_photos'), containsAll(['item_id', 'path', 'sort']));
+    expect(await columns('invoice_items'), contains('charge_id'));
+    expect(
+      await columns('bookings'),
+      containsAll(['courier_name', 'courier_no', 'dispatched_at', 'extra_charges']),
+    );
     expect(await columns('items'), containsAll(['hsn', 'gst_rate', 'quantity']));
   });
 
-  test('the version number moves to 3', () {
-    expect(AppDatabase.schemaVersion, 3);
+  test('the version number moves to 6', () {
+    expect(AppDatabase.schemaVersion, 6);
   });
 }

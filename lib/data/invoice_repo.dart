@@ -95,6 +95,26 @@ class InvoiceRepo {
           'total': l.total,
         });
       }
+      // late-return and damage charges are lines of their own, without GST
+      for (final c in booking.charges) {
+        taxable += c.amount;
+        total += c.amount;
+        lines.add({
+          'name': chargeLineName(c.kind, c.note),
+          'charge_id': c.id,
+          'hsn': '',
+          'rate_type': RateType.event.name,
+          'rate': c.amount,
+          'days': 1,
+          'qty': 1,
+          'gst_rate': 0.0,
+          'taxable': c.amount,
+          'cgst': 0.0,
+          'sgst': 0.0,
+          'igst': 0.0,
+          'total': c.amount,
+        });
+      }
       final id = await txn.insert('invoices', {
         'uuid': newUuid(),
         'updated_at': ms,

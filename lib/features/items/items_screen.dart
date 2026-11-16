@@ -8,8 +8,13 @@ import '../../data/models.dart';
 import '../../data/repositories.dart';
 import '../../data/staff.dart';
 import '../../l10n/strings.dart';
+import '../../subscription/gates.dart';
+import '../../subscription/plan.dart';
 import '../common/widgets.dart';
+import 'catalog_screen.dart';
 import 'item_form_screen.dart';
+import 'item_photo_strip.dart';
+import 'item_share_sheet.dart';
 
 /// The things the shop rents out, with a search box and an add button.
 class ItemsScreen extends ConsumerWidget {
@@ -21,12 +26,22 @@ class ItemsScreen extends ConsumerWidget {
     final searching = ref.watch(itemSearchProvider).trim().isNotEmpty;
     final terms = ref.watch(termsProvider);
     final canEdit = ref.watch(permsProvider).can(Permission.editItems);
+    final covers = ref.watch(itemCoversProvider).valueOrNull ?? const {};
 
     Future<void> open([RentItem? item]) async {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => ItemFormScreen(item: item)),
       );
       ref.invalidate(itemsProvider);
+      ref.invalidate(itemCoversProvider);
+    }
+
+    Future<void> catalog() async {
+      if (!await requirePro(context, ref, ProFeature.catalog)) return;
+      if (!context.mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const CatalogScreen()),
+      );
     }
 
     return Scaffold(
@@ -45,6 +60,11 @@ class ItemsScreen extends ConsumerWidget {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
+                ),
+                IconButton(
+                  tooltip: tr('Share a catalog'),
+                  icon: const Icon(Icons.collections_outlined),
+                  onPressed: catalog,
                 ),
                 if (canEdit)
                   FilledButton.tonalIcon(
@@ -86,7 +106,9 @@ class ItemsScreen extends ConsumerWidget {
                   itemBuilder: (_, i) => _ItemTile(
                     item: list[i],
                     service: terms.service,
+                    cover: covers[list[i].id],
                     onTap: canEdit ? () => open(list[i]) : null,
+                    onShare: () => showItemShareSheet(context, list[i]),
                   ),
                 );
               },
@@ -103,10 +125,14 @@ class _ItemTile extends StatelessWidget {
     required this.item,
     required this.onTap,
     required this.service,
+    required this.onShare,
+    this.cover,
   });
   final RentItem item;
   final bool service;
+  final String? cover;
   final VoidCallback? onTap;
+  final VoidCallback onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -137,18 +163,21 @@ class _ItemTile extends StatelessWidget {
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                CircleAvatar(
-                  backgroundColor: Theme.of(
-                    context,
-                  ).colorScheme.primaryContainer,
-                  child: Text(
-                    item.name.isEmpty ? '?' : item.name[0].toUpperCase(),
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                      fontWeight: FontWeight.w800,
+                if (cover != null)
+                  PhotoThumb(path: cover!, size: 48)
+                else
+                  CircleAvatar(
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.primaryContainer,
+                    child: Text(
+                      item.name.isEmpty ? '?' : item.name[0].toUpperCase(),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -186,6 +215,11 @@ class _ItemTile extends StatelessWidget {
                       ),
                     ],
                   ],
+                ),
+                IconButton(
+                  tooltip: tr('Send on WhatsApp'),
+                  icon: const Icon(Icons.send_outlined),
+                  onPressed: onShare,
                 ),
               ],
             ),

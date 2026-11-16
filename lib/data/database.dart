@@ -64,7 +64,15 @@ class AppDatabase {
   ///
   /// 3 = quantity: how many of an item the shop has, and how many were
   /// booked on a line; appointment time and who made a booking; staff logins.
-  static const schemaVersion = 3;
+  ///
+  /// 4 = courier dispatch (courier name, tracking number and date on a
+  /// booking) and late-return / damage charges on a booking.
+  ///
+  /// 5 = an invoice line made from a charge remembers which charge it is
+  /// (`invoice_items.charge_id`), so removing the charge finds its line.
+  ///
+  /// 6 = pictures of items (`item_photos`).
+  static const schemaVersion = 6;
 
   /// Closes the connection; the next access reopens the file. Used by restore.
   Future<void> close() async {
@@ -87,6 +95,68 @@ class AppDatabase {
   Future<void> _onUpgrade(Database d, int from, int to) async {
     if (from < 2) await _migrateTo2(d);
     if (from < 3) await _migrateTo3(d);
+    if (from < 4) await _migrateTo4(d);
+    if (from < 5) await _migrateTo5(d);
+    if (from < 6) await _migrateTo6(d);
+  }
+
+  @visibleForTesting
+  Future<void> migrateTo6ForTest(Database d) => _migrateTo6(d);
+
+  Future<void> _migrateTo6(Database d) => ensureItemPhotosTable(d);
+
+  /// The pictures of an item, in the order they are shown (the first is the
+  /// cover). `path` is a file in the app's photo folder.
+  static Future<void> ensureItemPhotosTable(DatabaseExecutor d) async {
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS item_photos(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        sort INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      )''');
+    await d.execute(
+      'CREATE INDEX IF NOT EXISTS idx_item_photos_item ON item_photos(item_id)',
+    );
+  }
+
+  @visibleForTesting
+  Future<void> migrateTo5ForTest(Database d) => _migrateTo5(d);
+
+  Future<void> _migrateTo5(Database d) async {
+    await _addColumn(d, 'invoice_items', 'charge_id', 'INTEGER');
+  }
+
+  @visibleForTesting
+  Future<void> migrateTo4ForTest(Database d) => _migrateTo4(d);
+
+  /// Courier details and extra charges. Nothing that was entered changes: no
+  /// booking has been dispatched or charged yet.
+  Future<void> _migrateTo4(Database d) async {
+    await _addColumn(d, 'bookings', 'courier_name', "TEXT NOT NULL DEFAULT ''");
+    await _addColumn(d, 'bookings', 'courier_no', "TEXT NOT NULL DEFAULT ''");
+    await _addColumn(d, 'bookings', 'dispatched_at', 'INTEGER');
+    await _addColumn(d, 'bookings', 'extra_charges', 'REAL NOT NULL DEFAULT 0');
+    await ensureChargesTable(d);
+  }
+
+  /// Late-return and damage charges added to a booking. Their total is also
+  /// kept in `bookings.extra_charges` and is part of `bookings.payable`.
+  /// kind: 'late' or 'damage'.
+  static Future<void> ensureChargesTable(DatabaseExecutor d) async {
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS booking_charges(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        amount REAL NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL
+      )''');
+    await d.execute(
+      'CREATE INDEX IF NOT EXISTS idx_booking_charges_booking ON booking_charges(booking_id)',
+    );
   }
 
   @visibleForTesting
@@ -213,7 +283,8 @@ class AppDatabase {
       )''');
     await d.execute('CREATE INDEX idx_customers_name ON customers(name)');
 
-    // status: 'booked' -> 'picked_up' -> 'returned', or 'cancelled'.
+    // status: 'booked' -> 'picked_up' (or 'dispatched' by courier) -> 'returned',
+    // or 'cancelled'.
     // event_date, pickup_date and return_date are whole days.
     await d.execute('''
       CREATE TABLE bookings(
@@ -234,6 +305,10 @@ class AppDatabase {
         remind_days INTEGER NOT NULL DEFAULT 2,
         event_time TEXT NOT NULL DEFAULT '',
         created_by TEXT NOT NULL DEFAULT '',
+        courier_name TEXT NOT NULL DEFAULT '',
+        courier_no TEXT NOT NULL DEFAULT '',
+        dispatched_at INTEGER,
+        extra_charges REAL NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL
       )''');
     await d.execute(
@@ -285,6 +360,8 @@ class AppDatabase {
     await d.execute(
       'CREATE INDEX idx_payments_booking ON payments(booking_id)',
     );
+    await ensureChargesTable(d);
+    await ensureItemPhotosTable(d);
 
     // stage: 'pickup', 'return' or 'other'. path is a file in the app folder.
     await d.execute('''
@@ -362,7 +439,8 @@ class AppDatabase {
         cgst REAL NOT NULL DEFAULT 0,
         sgst REAL NOT NULL DEFAULT 0,
         igst REAL NOT NULL DEFAULT 0,
-        total REAL NOT NULL DEFAULT 0
+        total REAL NOT NULL DEFAULT 0,
+        charge_id INTEGER
       )''');
     await d.execute(
       'CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)',

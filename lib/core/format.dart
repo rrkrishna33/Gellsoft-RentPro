@@ -13,6 +13,9 @@ String money(double v) => _inr.format(v);
 /// A date written for lists and receipts, for example "05 Mar 2027".
 String dateText(DateTime d) => DateFormat('dd MMM yyyy').format(d);
 
+/// "November 2026".
+String monthYearText(DateTime d) => DateFormat('MMMM yyyy').format(d);
+
 /// A date and time, for example "05 Mar 2027, 06:30 PM".
 String dateTimeText(DateTime d) =>
     DateFormat('dd MMM yyyy, hh:mm a').format(d);

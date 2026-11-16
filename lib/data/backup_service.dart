@@ -146,24 +146,34 @@ class BackupService {
     final path = await AppDatabase.instance.pathFor(id);
     if (!File(path).existsSync()) return const [];
     if (id == Shops.activeId) {
-      final db = await AppDatabase.instance.db;
-      return [
-        for (final r in await db.query('booking_photos', columns: ['path']))
-          r['path'] as String,
-      ];
+      return _photoPathsIn(await AppDatabase.instance.db);
     }
     final db = await openDatabase(path, readOnly: true, singleInstance: false);
     try {
-      return [
-        for (final r in await db.query('booking_photos', columns: ['path']))
-          r['path'] as String,
-      ];
-    } catch (_) {
-      return const []; // a file without that table has no photos
+      return await _photoPathsIn(db);
     } finally {
       await db.close();
     }
   }
+
+  /// Booking photos and item pictures. A file without one of the tables (an
+  /// older one) simply has none of those.
+  static Future<List<String>> _photoPathsIn(DatabaseExecutor db) async {
+    final out = <String>[];
+    for (final table in _photoTables) {
+      try {
+        for (final r in await db.query(table, columns: ['path'])) {
+          out.add(r['path'] as String);
+        }
+      } catch (_) {
+        // no such table in this file
+      }
+    }
+    return out;
+  }
+
+  /// The tables whose rows point at a file in the photo folder.
+  static const _photoTables = ['booking_photos', 'item_photos'];
 
   /// Everything in one file: every shop's database, the photos and logos they
   /// use, and the settings.
@@ -364,14 +374,22 @@ class BackupService {
     }
     for (final e in written.entries) {
       await _withFile(e.value, (db) async {
-        for (final r in await db.query('booking_photos', columns: ['id', 'path'])) {
-          final name = p.basename(r['path'] as String);
-          await db.update(
-            'booking_photos',
-            {'path': p.join(folder.path, name)},
-            where: 'id = ?',
-            whereArgs: [r['id']],
-          );
+        for (final table in _photoTables) {
+          final List<Map<String, Object?>> rows;
+          try {
+            rows = await db.query(table, columns: ['id', 'path']);
+          } catch (_) {
+            continue; // an older backup has no such table
+          }
+          for (final r in rows) {
+            final name = p.basename(r['path'] as String);
+            await db.update(
+              table,
+              {'path': p.join(folder.path, name)},
+              where: 'id = ?',
+              whereArgs: [r['id']],
+            );
+          }
         }
       });
     }

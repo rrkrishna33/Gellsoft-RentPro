@@ -2,6 +2,7 @@ import '../../core/format.dart';
 import '../../data/booking_models.dart';
 import '../../data/business_profile.dart';
 import '../../data/invoice_models.dart';
+import '../../data/models.dart';
 import '../../data/reminders.dart';
 import '../../l10n/strings.dart';
 
@@ -49,6 +50,41 @@ String confirmationMessage(Booking b, BusinessProfile shop) =>
           'sign': _sign(shop),
         },
       );
+
+/// Sent to the customer when the items are sent by courier. The courier's
+/// name and tracking number are added when they were entered.
+String dispatchMessage(Booking b, BusinessProfile shop) {
+  final courier = [
+    if (b.courierName.isNotEmpty)
+      tr('Courier: {name}', {'name': b.courierName}),
+    if (b.courierNo.isNotEmpty)
+      tr('Tracking number: {no}', {'no': b.courierNo}),
+  ].join('\n');
+  return tr(
+    'Hello {name}, your items for booking #{n} have been sent from {shop}.{courier}\nPlease keep them safe and return them by {ret}. Thank you!\n{sign}',
+    {
+      'name': b.customerName,
+      'n': b.number,
+      'shop': shop.name,
+      'courier': courier.isEmpty ? '' : '\n$courier',
+      'ret': dateText(b.returnDate),
+      'sign': _sign(shop),
+    },
+  );
+}
+
+/// Goes with the pictures of an item sent to a customer: what it is and what
+/// it costs.
+String itemShareMessage(RentItem i, BusinessProfile shop) => [
+  i.name,
+  if (i.size.trim().isNotEmpty) tr('Size: {size}', {'size': i.size.trim()}),
+  tr('Rent: {amount} ({rate})', {
+    'amount': money(i.rate),
+    'rate': i.rateType.label,
+  }),
+  if (i.deposit > 0) tr('Deposit: {amount}', {'amount': money(i.deposit)}),
+  _sign(shop),
+].join('\n');
 
 /// The message for a reminder of the given kind, to the customer.
 String reminderMessage(ReminderKind kind, Booking b, BusinessProfile shop) =>

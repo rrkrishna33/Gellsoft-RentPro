@@ -10,7 +10,7 @@ Flutter (Android only), Riverpod, SQLite (sqflite). The look and the subscriptio
 - `lib/l10n`: `tr('English')` and the Tamil table `ta.dart`; `test/translation_test.dart` makes sure every phrase has Tamil.
 
 ## Rules that live in one place
-- Free limits: `FreePlan` in `plan.dart` (12 bookings a month, 2 photos a booking). They are enforced in `BookingRepo` (the data layer), not only in screens.
+- Free limits: `FreePlan` in `plan.dart` (10 bookings a month, 2 photos a booking). They are enforced in `BookingRepo` (the data layer), not only in screens.
 - A booking blocks an item from pickup to return, both days included; cancelled and returned bookings do not block; an item still out and late stays blocked until it is back.
 - Money: `splitMoney` shares the discount between lines by amount and taxes each line at its own rate (added on top, or taken out when rents include GST). A booking stores `rent_total`, `tax_total` and `payable`; deposit is separate and never taxed.
 - Invoices keep their own copy of the customer and every line, so they never change; numbers are never reused.
@@ -21,6 +21,12 @@ Each shop is a separate SQLite file (`gellsoft_rentpro.db` for the first, `gells
 
 ## Quantity
 An item has `quantity` pieces and a booking line has `qty`. `BookingRepo._availability` finds, for the days asked about, the most pieces held on any one day by other open bookings (a late item still out keeps its pieces), and the free pieces are the stock less that. Rate and deposit are for one piece; a line's amount is rate x days x qty. A service business (`ShopType.isService`) skips the availability check.
+
+## Courier dispatch and charges
+`BookingStatus.dispatched` sits between booked and returned; `isOut` is true for picked up and dispatched, and everything that used to test for picked up (overdue, reminders, conflicts, the Out list, the dashboard) uses it. The courier name, number and date are columns of `bookings` and both name and number are optional. Late and damage charges are rows of `booking_charges`; their total is also kept in `bookings.extra_charges` and added to `bookings.payable`, so every report, balance and list that reads `payable` includes them without further changes. `BookingRepo.update` keeps the charges when the rent is recalculated, and an invoice made from the booking gets a line for each charge (no GST). An invoice line made from a charge keeps the charge's id (`invoice_items.charge_id`), so adding or removing a charge after the invoice exists adds or removes exactly that line and moves the invoice total. Database version 4 adds the courier and charge columns and version 5 the charge id on invoice lines (`_migrateTo4`, `_migrateTo5`, both safe to run twice).
+
+## Item pictures and the catalog
+Pictures of an item are rows of `item_photos` (item, file path, sort order; the first is the cover; database version 6), files in the same photo folder as booking photos, resized to about 1200 pixels. `ItemRepo.addPhoto` enforces the limit (`FreePlan.photosPerItem` = 1, `proPhotosPerItem` = 5), `covers()` answers the lists in one query, and the backup carries item pictures and points their rows at the new phone's folder on restore (`_photoTables`). The item form keeps its picture changes in memory and writes them on Save; files picked and not saved are deleted. Sending one item uses `sendImagesOnWhatsApp` (native method `sendImages` in `MainActivity.kt`, the same FileProvider folder as PDFs, WhatsApp, then WhatsApp Business, then the share sheet). The catalog (Pro) is a PDF built by `buildCatalogPdf` and sent with the existing PDF share.
 
 ## Staff logins
 `Permission` and `Role.can` in `staff.dart` are the only place that says what a role may do; screens ask `permsProvider`. `LockGate` covers the app with the sign-in screen while there are people and nobody is signed in.

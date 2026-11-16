@@ -233,8 +233,7 @@ List<PlannedNotification> planNotifications({
         }
       }
       if (!service &&
-          (b.status == BookingStatus.booked ||
-              b.status == BookingStatus.pickedUp)) {
+          (b.status == BookingStatus.booked || b.status.isOut)) {
         for (var t = 0; t < times.length; t++) {
           final when = at(b.returnDate, times[t]);
           if (!when.isAfter(now) ||

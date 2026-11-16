@@ -10,14 +10,20 @@ import '../l10n/strings.dart';
 class FreePlan {
   /// New bookings a shop may create in one calendar month before Pro is
   /// needed. Existing bookings stay fully usable.
-  static const bookingsPerMonth = 12;
+  static const bookingsPerMonth = 10;
 
   /// Photos kept on one booking (pickup and return together).
   static const photosPerBooking = 2;
+
+  /// Pictures of one item (the first is the cover).
+  static const photosPerItem = 1;
 }
 
+/// Pictures of one item with Pro.
+const proPhotosPerItem = 5;
+
 /// From this many bookings the app starts telling the user how many are left.
-const warnAtBookings = 9;
+const warnAtBookings = 7;
 
 /// Length of the Pro trial every phone gets once.
 const trialLengthDays = 7;
@@ -32,7 +38,15 @@ enum ProFeature {
   notifications('Daily and custom reminder notifications'),
   autoBackup('Automatic daily backup to Google Drive'),
   multiShop('More than one shop, each kept separately'),
-  staff('Staff logins (Admin, Staff, Cashier)');
+  staff('Staff logins (Admin, Staff, Cashier)'),
+  calendar('Availability calendar'),
+  charges('Late fee and damage charges'),
+  staffReport('Staff-wise booking report'),
+  logo('Your logo on invoices and receipts'),
+  export('Export to Excel (CSV) and GSTR-1 sheets'),
+  bulkReminders('Remind everyone who owes in one go'),
+  itemPhotos('More pictures of each item'),
+  catalog('Share a catalog of your items');
 
   /// English wording; also the translation key (see `tr`).
   final String en;

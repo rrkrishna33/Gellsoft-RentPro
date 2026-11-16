@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/ids.dart';
+import '../subscription/plan.dart';
+import 'booking_repo.dart' show BookingError, BookingException;
 import 'database.dart';
 import 'models.dart';
 
@@ -99,6 +101,84 @@ class ItemRepo {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  /// The pictures of one item, the cover first.
+  Future<List<ItemPhoto>> photosOf(int itemId) async {
+    final d = await AppDatabase.instance.db;
+    final rows = await d.query(
+      'item_photos',
+      where: 'item_id = ?',
+      whereArgs: [itemId],
+      orderBy: 'sort, id',
+    );
+    return rows.map(ItemPhoto.fromRow).toList();
+  }
+
+  /// The cover picture of every item that has one (item id to file path), for
+  /// lists. One query, not one per item.
+  Future<Map<int, String>> covers() async {
+    final d = await AppDatabase.instance.db;
+    final rows = await d.rawQuery('''
+      SELECT p.item_id AS item_id, p.path AS path
+      FROM item_photos p
+      WHERE p.id = (SELECT q.id FROM item_photos q WHERE q.item_id = p.item_id
+                    ORDER BY q.sort, q.id LIMIT 1)
+    ''');
+    return {for (final r in rows) r['item_id'] as int: r['path'] as String};
+  }
+
+  /// Adds a picture (a file already saved in the app's folder) at the end.
+  /// The free plan keeps [FreePlan.photosPerItem]; Pro keeps
+  /// [proPhotosPerItem]. Returns the new picture's id.
+  Future<int> addPhoto(int itemId, String path, {required bool isPro}) async {
+    final d = await AppDatabase.instance.db;
+    return d.transaction((txn) async {
+      final n = (await txn.rawQuery(
+        'SELECT COUNT(*) AS n, COALESCE(MAX(sort), -1) AS top FROM item_photos WHERE item_id = ?',
+        [itemId],
+      )).first;
+      final limit = isPro ? proPhotosPerItem : FreePlan.photosPerItem;
+      if ((n['n'] as int) >= limit) {
+        throw const BookingException(BookingError.limitReached);
+      }
+      return txn.insert('item_photos', {
+        'item_id': itemId,
+        'path': path,
+        'sort': (n['top'] as int) + 1,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      });
+    });
+  }
+
+  /// Takes a picture off an item. Returns its file path so the caller can
+  /// delete the file, or null if there was no such picture.
+  Future<String?> removePhoto(int photoId) async {
+    final d = await AppDatabase.instance.db;
+    final rows = await d.query('item_photos', where: 'id = ?', whereArgs: [photoId]);
+    if (rows.isEmpty) return null;
+    await d.delete('item_photos', where: 'id = ?', whereArgs: [photoId]);
+    return rows.first['path'] as String;
+  }
+
+  /// Puts the pictures of an item in the given order (the first becomes the
+  /// cover). Pictures not listed keep their place after the listed ones.
+  Future<void> setPhotoOrder(int itemId, List<int> ids) async {
+    final d = await AppDatabase.instance.db;
+    await d.transaction((txn) async {
+      for (var i = 0; i < ids.length; i++) {
+        await txn.update(
+          'item_photos',
+          {'sort': i},
+          where: 'id = ? AND item_id = ?',
+          whereArgs: [ids[i], itemId],
+        );
+      }
+      await txn.rawUpdate(
+        'UPDATE item_photos SET sort = sort + ? WHERE item_id = ? AND id NOT IN (${ids.isEmpty ? '0' : ids.join(',')})',
+        [ids.length, itemId],
+      );
+    });
   }
 
   /// The categories already in use, so the form can offer them again.
@@ -213,6 +293,11 @@ final itemsProvider = FutureProvider.autoDispose<List<RentItem>>((ref) {
   final q = ref.watch(itemSearchProvider);
   return ref.watch(itemRepoProvider).list(query: q);
 });
+
+/// The cover picture of every item that has one (item id to file path).
+final itemCoversProvider = FutureProvider.autoDispose<Map<int, String>>(
+  (ref) => ref.watch(itemRepoProvider).covers(),
+);
 
 final customersProvider = FutureProvider.autoDispose<List<Customer>>((ref) {
   final q = ref.watch(customerSearchProvider);

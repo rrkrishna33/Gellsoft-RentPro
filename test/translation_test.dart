@@ -41,6 +41,7 @@ Set<String> phrasesInCode() {
     ..addAll(ItemStatus.values.map((s) => s.en))
     ..addAll(BookingStatus.values.map((s) => s.en))
     ..addAll(PaymentKind.values.map((k) => k.en))
+    ..addAll(ChargeKind.values.map((k) => k.en))
     ..addAll(PayMode.values.map((m) => m.en))
     ..addAll(BookingFilter.values.map((f) => f.en));
   return out;

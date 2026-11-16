@@ -13,6 +13,7 @@ import '../../data/invoice_models.dart';
 import '../../data/invoice_repo.dart';
 import '../../data/staff.dart';
 import '../../l10n/strings.dart';
+import '../../subscription/entitlement.dart';
 import '../bookings/booking_detail_screen.dart';
 import '../bookings/messages.dart';
 import '../common/widgets.dart';
@@ -34,6 +35,7 @@ class InvoiceDetailScreen extends ConsumerWidget {
       depositTotal: booking?.depositTotal ?? 0,
       depositHeld: booking?.depositHeld ?? 0,
       eventTime: booking?.eventTime ?? '',
+      showLogo: ref.read(isProProvider),
     );
   }
 

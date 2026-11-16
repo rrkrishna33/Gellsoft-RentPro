@@ -143,16 +143,26 @@ enum BookingFilter {
   upcoming('Upcoming'),
   out('Out'),
   returned('Returned'),
+  due('Balance due'),
   cancelled('Cancelled');
 
   final String en;
   const BookingFilter(this.en);
 
-  BookingStatus get status => switch (this) {
-    upcoming => BookingStatus.booked,
-    out => BookingStatus.pickedUp,
-    returned => BookingStatus.returned,
-    cancelled => BookingStatus.cancelled,
+  /// The statuses this list shows. Out covers items collected by the
+  /// customer and items sent by courier. Balance due has no status of its
+  /// own: it is every booking, not cancelled, that still owes rent.
+  List<BookingStatus> get statuses => switch (this) {
+    upcoming => [BookingStatus.booked],
+    out => [BookingStatus.pickedUp, BookingStatus.dispatched],
+    returned => [BookingStatus.returned],
+    due => [
+      BookingStatus.booked,
+      BookingStatus.pickedUp,
+      BookingStatus.dispatched,
+      BookingStatus.returned,
+    ],
+    cancelled => [BookingStatus.cancelled],
   };
 }
 
@@ -179,8 +189,18 @@ class BookingRepo {
     String query = '',
   }) async {
     final d = await AppDatabase.instance.db;
-    final where = StringBuffer('b.deleted = 0 AND b.status = ?');
-    final args = <Object?>[filter.status.db];
+    final statuses = filter.statuses;
+    final where = StringBuffer(
+      'b.deleted = 0 AND b.status IN (${List.filled(statuses.length, '?').join(',')})',
+    );
+    final args = <Object?>[for (final s in statuses) s.db];
+    if (filter == BookingFilter.due) {
+      where.write(
+        ' AND b.payable - COALESCE((SELECT SUM(p.amount) FROM payments p'
+        " WHERE p.booking_id = b.id AND p.kind IN ('advance', 'balance')), 0)"
+        ' > 0.005',
+      );
+    }
     final q = query.trim();
     if (q.isNotEmpty) {
       final like =
@@ -192,7 +212,9 @@ class BookingRepo {
       args.addAll([like, like, q.replaceFirst('#', '')]);
     }
     final upward =
-        filter == BookingFilter.upcoming || filter == BookingFilter.out;
+        filter == BookingFilter.upcoming ||
+        filter == BookingFilter.out ||
+        filter == BookingFilter.due;
     final rows = await d.rawQuery('''
       SELECT b.*, c.name AS c_name, c.phone AS c_phone
       FROM bookings b JOIN customers c ON c.id = b.customer_id
@@ -229,7 +251,7 @@ class BookingRepo {
       SELECT b.*, c.name AS c_name, c.phone AS c_phone
       FROM bookings b JOIN customers c ON c.id = b.customer_id
       WHERE b.deleted = 0 AND (
-        b.status IN ('booked', 'picked_up')
+        b.status IN ('booked', 'picked_up', 'dispatched')
         OR (b.status = 'returned' AND b.payable - COALESCE((
               SELECT SUM(p.amount) FROM payments p
               WHERE p.booking_id = b.id AND p.kind IN ('advance', 'balance')), 0) > 0.005)
@@ -272,6 +294,10 @@ class BookingRepo {
       'SELECT * FROM booking_photos WHERE booking_id IN ($marks) ORDER BY id',
       ids,
     );
+    final chargeRows = await d.rawQuery(
+      'SELECT * FROM booking_charges WHERE booking_id IN ($marks) ORDER BY created_at, id',
+      ids,
+    );
     List<T> pick<T>(
       List<Map<String, Object?>> src,
       int id,
@@ -303,8 +329,27 @@ class BookingRepo {
           remindDays: (r['remind_days'] as int?) ?? 2,
           eventTime: (r['event_time'] as String?) ?? '',
           createdBy: (r['created_by'] as String?) ?? '',
+          courierName: (r['courier_name'] as String?) ?? '',
+          courierNo: (r['courier_no'] as String?) ?? '',
+          dispatchedAt: r['dispatched_at'] == null
+              ? null
+              : DateTime.fromMillisecondsSinceEpoch(r['dispatched_at'] as int),
           createdAt: DateTime.fromMillisecondsSinceEpoch(
             r['created_at'] as int,
+          ),
+          charges: pick(
+            chargeRows,
+            r['id'] as int,
+            (c) => BookingCharge(
+              id: c['id'] as int,
+              bookingId: c['booking_id'] as int,
+              kind: ChargeKind.fromName(c['kind'] as String?),
+              amount: (c['amount'] as num).toDouble(),
+              note: (c['note'] as String?) ?? '',
+              createdAt: DateTime.fromMillisecondsSinceEpoch(
+                c['created_at'] as int,
+              ),
+            ),
           ),
           lines: pick(
             lineRows,
@@ -471,7 +516,7 @@ class BookingRepo {
       FROM booking_items bi
       JOIN bookings b ON b.id = bi.booking_id
       JOIN customers c ON c.id = b.customer_id
-      WHERE b.deleted = 0 AND b.status IN ('booked', 'picked_up')
+      WHERE b.deleted = 0 AND b.status IN ('booked', 'picked_up', 'dispatched')
         AND bi.item_id IN ($marks)
     ''', itemIds);
     // the bookings that share a day with the dates asked about, per item
@@ -482,7 +527,7 @@ class BookingRepo {
       final from = _day(r['pickup_date']);
       var to = _day(r['return_date']);
       // still out and late: it is not back, so it is held until it is
-      if (r['status'] == 'picked_up' && to.isBefore(today)) to = today;
+      if (r['status'] != 'booked' && to.isBefore(today)) to = today;
       if (!rangesOverlap(pickup, ret, from, to)) continue;
       final id = r['item_id'] as int;
       overlaps.putIfAbsent(id, () => []).add((
@@ -625,6 +670,15 @@ class BookingRepo {
         throw const BookingException(BookingError.badState);
       }
       final p = await _prepare(txn, draft, id, at, gst, checkAvailability);
+      // charges added at return stay part of what is owed
+      final charged = ((await txn.query(
+                'bookings',
+                columns: ['extra_charges'],
+                where: 'id = ?',
+                whereArgs: [id],
+              )).first['extra_charges'] as num?)
+              ?.toDouble() ??
+          0;
       await txn.update(
         'bookings',
         {
@@ -636,7 +690,7 @@ class BookingRepo {
           'deposit_total': p.deposit,
           'discount': draft.discount,
           'tax_total': p.tax,
-          'payable': p.payable,
+          'payable': r2(p.payable + charged),
           'notes': draft.notes.trim(),
           'remind_days': draft.remindDays,
           'event_time': draft.eventTime,
@@ -786,9 +840,251 @@ class BookingRepo {
   Future<void> markPickedUp(int id, {DateTime? now}) =>
       _move(id, BookingStatus.booked, BookingStatus.pickedUp, now);
 
-  /// The items come back. Only a picked-up booking can be returned.
-  Future<void> markReturned(int id, {DateTime? now}) =>
-      _move(id, BookingStatus.pickedUp, BookingStatus.returned, now);
+  /// The items are sent by courier. Only a booked booking can be dispatched.
+  /// The courier's name and the tracking number are optional.
+  Future<void> markDispatched(
+    int id, {
+    String courierName = '',
+    String courierNo = '',
+    DateTime? now,
+  }) async {
+    final d = await AppDatabase.instance.db;
+    final at = now ?? DateTime.now();
+    await d.transaction((txn) async {
+      if (await _status(txn, id) != BookingStatus.booked) {
+        throw const BookingException(BookingError.badState);
+      }
+      await txn.update(
+        'bookings',
+        {
+          'status': BookingStatus.dispatched.db,
+          'courier_name': courierName.trim(),
+          'courier_no': courierNo.trim(),
+          'dispatched_at': at.millisecondsSinceEpoch,
+          'updated_at': at.millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
+  /// Corrects the courier's name or the tracking number of a dispatched
+  /// booking.
+  Future<void> updateCourier(
+    int id, {
+    required String courierName,
+    required String courierNo,
+    DateTime? now,
+  }) async {
+    final d = await AppDatabase.instance.db;
+    await d.transaction((txn) async {
+      final s = await _status(txn, id);
+      if (s != BookingStatus.dispatched && s != BookingStatus.returned) {
+        throw const BookingException(BookingError.badState);
+      }
+      await txn.update(
+        'bookings',
+        {
+          'courier_name': courierName.trim(),
+          'courier_no': courierNo.trim(),
+          'updated_at': (now ?? DateTime.now()).millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
+  /// The items come back. Only a booking whose items are out (collected or
+  /// dispatched) can be returned.
+  Future<void> markReturned(int id, {DateTime? now}) async {
+    final d = await AppDatabase.instance.db;
+    await d.transaction((txn) async {
+      if (!(await _status(txn, id)).isOut) {
+        throw const BookingException(BookingError.badState);
+      }
+      await txn.update(
+        'bookings',
+        {
+          'status': BookingStatus.returned.db,
+          'updated_at': (now ?? DateTime.now()).millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
+  /// Adds a late-return or damage charge. It is added to what the customer
+  /// owes. Only a booking whose items have gone out, or are back, can be
+  /// charged.
+  Future<int> addCharge(
+    int bookingId, {
+    required ChargeKind kind,
+    required double amount,
+    String note = '',
+    DateTime? now,
+  }) async {
+    final amt = r2(amount);
+    if (amt <= 0.004) throw const BookingException(BookingError.badAmount);
+    final d = await AppDatabase.instance.db;
+    final at = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    return d.transaction((txn) async {
+      final s = await _status(txn, bookingId);
+      if (!s.isOut && s != BookingStatus.returned) {
+        throw const BookingException(BookingError.badState);
+      }
+      final id = await txn.insert('booking_charges', {
+        'booking_id': bookingId,
+        'kind': kind.name,
+        'amount': amt,
+        'note': note.trim(),
+        'created_at': at,
+      });
+      await txn.rawUpdate(
+        'UPDATE bookings SET payable = payable + ?, extra_charges = extra_charges + ?, updated_at = ? WHERE id = ?',
+        [amt, amt, at, bookingId],
+      );
+      // the invoice already made for this booking gets the charge as a line
+      final inv = await _activeInvoiceId(txn, bookingId);
+      if (inv != null) {
+        await txn.insert('invoice_items', {
+          'invoice_id': inv,
+          'name': chargeLineName(kind, note),
+          'charge_id': id,
+          'hsn': '',
+          'rate_type': RateType.event.name,
+          'rate': amt,
+          'days': 1,
+          'qty': 1,
+          'gst_rate': 0.0,
+          'taxable': amt,
+          'cgst': 0.0,
+          'sgst': 0.0,
+          'igst': 0.0,
+          'total': amt,
+        });
+        await _shiftInvoice(txn, inv, amt, at);
+      }
+      return id;
+    });
+  }
+
+  Future<int?> _activeInvoiceId(DatabaseExecutor d, int bookingId) async {
+    final rows = await d.query(
+      'invoices',
+      columns: ['id'],
+      where: "booking_id = ? AND status = 'active' AND deleted = 0",
+      whereArgs: [bookingId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first['id'] as int;
+  }
+
+  /// Moves an invoice's taxable value and total by [delta] (a charge is not
+  /// taxed, so both change by the same amount).
+  Future<void> _shiftInvoice(
+    DatabaseExecutor d,
+    int invoiceId,
+    double delta,
+    int at,
+  ) => d.rawUpdate(
+    'UPDATE invoices SET taxable = taxable + ?, total = total + ?, updated_at = ? WHERE id = ?',
+    [delta, delta, at, invoiceId],
+  );
+
+  /// Takes a charge off again (it was added by mistake or waived). When the
+  /// customer had already paid it, what they paid beyond the new total is
+  /// recorded as a negative balance payment ("refund of a removed charge"),
+  /// so the books show the money going back and the booking is not overpaid.
+  Future<void> removeCharge(int chargeId, {DateTime? now}) async {
+    final d = await AppDatabase.instance.db;
+    await d.transaction((txn) async {
+      final rows = await txn.query(
+        'booking_charges',
+        where: 'id = ?',
+        whereArgs: [chargeId],
+      );
+      if (rows.isEmpty) return;
+      final bookingId = rows.first['booking_id'] as int;
+      final amt = (rows.first['amount'] as num).toDouble();
+      final b = await _load(txn, bookingId);
+      final at = (now ?? DateTime.now()).millisecondsSinceEpoch;
+      final excess = r2(b.rentPaid - (b.payable - amt));
+      await txn.delete('booking_charges', where: 'id = ?', whereArgs: [chargeId]);
+      await txn.rawUpdate(
+        'UPDATE bookings SET payable = payable - ?, extra_charges = extra_charges - ?, updated_at = ? WHERE id = ?',
+        [amt, amt, at, bookingId],
+      );
+      // and comes off the invoice again (found by the charge's id; an
+      // invoice made before that has no such line and is left as it is)
+      final inv = await _activeInvoiceId(txn, bookingId);
+      if (inv != null) {
+        final gone = await txn.delete(
+          'invoice_items',
+          where: 'invoice_id = ? AND charge_id = ?',
+          whereArgs: [inv, chargeId],
+        );
+        if (gone > 0) await _shiftInvoice(txn, inv, -amt, at);
+      }
+      if (excess > 0.005) {
+        await txn.insert('payments', {
+          'booking_id': bookingId,
+          'kind': PaymentKind.balance.name,
+          'amount': -excess,
+          'mode': PayMode.cash.name,
+          'note': 'Refund of a removed charge',
+          'paid_at': at,
+        });
+      }
+    });
+  }
+
+  /// Every booking of one customer, newest first (cancelled ones included, so
+  /// the history is complete).
+  Future<List<Booking>> forCustomer(int customerId) async {
+    final d = await AppDatabase.instance.db;
+    final rows = await d.rawQuery(
+      '''
+      SELECT b.*, c.name AS c_name, c.phone AS c_phone
+      FROM bookings b JOIN customers c ON c.id = b.customer_id
+      WHERE b.deleted = 0 AND b.customer_id = ?
+      ORDER BY b.event_date DESC, b.id DESC
+    ''',
+      [customerId],
+    );
+    return _hydrate(d, rows);
+  }
+
+  /// Bookings whose items are held on some day from [from] to [to] (both
+  /// included): booked, collected or dispatched. A booking that is out and
+  /// late is held up to today. For the availability calendar.
+  Future<List<Booking>> heldBetween(
+    DateTime from,
+    DateTime to, {
+    DateTime? now,
+  }) async {
+    final d = await AppDatabase.instance.db;
+    final today = dayOf(now ?? DateTime.now());
+    final rows = await d.rawQuery(
+      '''
+      SELECT b.*, c.name AS c_name, c.phone AS c_phone
+      FROM bookings b JOIN customers c ON c.id = b.customer_id
+      WHERE b.deleted = 0 AND b.status IN ('booked', 'picked_up', 'dispatched')
+        AND b.pickup_date <= ?
+        AND (b.return_date >= ? OR (b.status != 'booked' AND ? >= ?))
+      ORDER BY b.pickup_date, b.id
+    ''',
+      [
+        dayOf(to).millisecondsSinceEpoch,
+        dayOf(from).millisecondsSinceEpoch,
+        today.millisecondsSinceEpoch,
+        dayOf(from).millisecondsSinceEpoch,
+      ],
+    );
+    return _hydrate(d, rows);
+  }
 
   /// A service booking (makeup) is finished: it goes straight from booked to
   /// done, because nothing was picked up or brought back.
@@ -918,6 +1214,12 @@ final bookingsProvider = FutureProvider.autoDispose<List<Booking>>((ref) {
   final q = ref.watch(bookingSearchProvider);
   return ref.watch(bookingRepoProvider).list(filter: filter, query: q);
 });
+
+/// Every booking of one customer, newest first.
+final customerBookingsProvider = FutureProvider.autoDispose
+    .family<List<Booking>, int>(
+      (ref, customerId) => ref.watch(bookingRepoProvider).forCustomer(customerId),
+    );
 
 /// One booking with its lines, payments and photos.
 /// What needs doing today (see [buildReminders]).

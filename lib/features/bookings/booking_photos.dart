@@ -36,7 +36,7 @@ class PhotosSection extends ConsumerWidget {
       showDragHandle: true,
       builder: (_) => _AddSheet(
         initialStage: switch (booking.status) {
-          BookingStatus.pickedUp => 'return',
+          BookingStatus.pickedUp || BookingStatus.dispatched => 'return',
           BookingStatus.returned => 'return',
           _ => 'pickup',
         },

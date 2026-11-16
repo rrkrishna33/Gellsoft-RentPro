@@ -26,7 +26,49 @@ Future<PdfSendResult> Function({
 })?
 pdfWhatsAppSender;
 
+/// Replaced in tests so nothing is launched.
+@visibleForTesting
+Future<PdfSendResult> Function({
+  required List<String> paths,
+  required String phone,
+  required String message,
+})?
+imagesWhatsAppSender;
+
 const _channel = MethodChannel('gellsoft/share');
+
+/// Sends pictures (files in the app's folder) on WhatsApp with [message] as
+/// the text. With no [paths] only the text goes. WhatsApp opens on the
+/// customer's chat when [phone] is a usable number; with no number the person
+/// chooses the chat inside WhatsApp. With no WhatsApp on the phone the share
+/// sheet opens instead.
+Future<PdfSendResult> sendImagesOnWhatsApp({
+  required List<String> paths,
+  required String phone,
+  required String message,
+}) async {
+  final hook = imagesWhatsAppSender;
+  if (hook != null) {
+    return hook(paths: paths, phone: phone, message: message);
+  }
+  // copies in the one folder the app lets other apps read; old ones go first
+  final dir = Directory(p.join((await getTemporaryDirectory()).path, 'shared'));
+  if (await dir.exists()) await dir.delete(recursive: true);
+  await dir.create(recursive: true);
+  final copies = <String>[];
+  for (final src in paths) {
+    if (!await File(src).exists()) continue;
+    final dest = p.join(dir.path, _safeName(p.basename(src)));
+    await File(src).copy(dest);
+    copies.add(dest);
+  }
+  final how = await _channel.invokeMethod<String>('sendImages', {
+    'paths': copies,
+    'number': whatsappNumber(phone),
+    'text': message,
+  });
+  return how == 'whatsapp' ? PdfSendResult.whatsapp : PdfSendResult.shareSheet;
+}
 
 /// Sends [bytes] as a PDF named [fileName] on WhatsApp, with [message] as the
 /// caption. WhatsApp opens on the customer's chat when [phone] is a usable

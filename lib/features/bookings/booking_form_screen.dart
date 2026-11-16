@@ -17,6 +17,7 @@ import '../../subscription/plan.dart';
 import '../../subscription/pro_prompt.dart';
 import '../common/widgets.dart';
 import '../customers/customer_form_screen.dart';
+import '../items/item_photo_strip.dart';
 import 'booking_errors.dart';
 
 /// Make a new booking, or change one that has not been returned or cancelled.
@@ -816,6 +817,7 @@ class _ItemPickerState extends ConsumerState<_ItemPicker> {
   String _q = '';
   List<RentItem> _all = const [];
   Map<int, ItemAvailability> _avail = const {};
+  Map<int, String> _covers = const {};
 
   @override
   void initState() {
@@ -837,10 +839,12 @@ class _ItemPickerState extends ConsumerState<_ItemPicker> {
                 ret: widget.ret,
                 exceptBookingId: widget.exceptBookingId,
               );
+    final covers = await ref.read(itemRepoProvider).covers();
     if (mounted) {
       setState(() {
         _all = items;
         _avail = avail;
+        _covers = covers;
       });
     }
   }
@@ -901,6 +905,9 @@ class _ItemPickerState extends ConsumerState<_ItemPicker> {
                             onChanged: (v) => setState(() {
                               v == true ? _on.add(i.id!) : _on.remove(i.id);
                             }),
+                            secondary: _covers[i.id] == null
+                                ? null
+                                : PhotoThumb(path: _covers[i.id]!, size: 48),
                             title: Text(i.name),
                             subtitle: Text(_pickerNote(i)),
                           ),

@@ -11,6 +11,8 @@ import '../../data/photo_store.dart';
 import '../../data/shops.dart';
 import '../../data/staff.dart';
 import '../../l10n/strings.dart';
+import '../../subscription/gates.dart';
+import '../../subscription/plan.dart';
 
 /// First start: the shop's name, what it does and how to reach it.
 /// Also used (with [editing]) from Settings to change them later, and (with
@@ -51,6 +53,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   Future<void> _chooseLogo() async {
+    if (!await requirePro(context, ref, ProFeature.logo)) return;
     final name = await PhotoStore.pickLogo();
     if (name == null) return;
     // a logo picked earlier in this visit and replaced is not kept

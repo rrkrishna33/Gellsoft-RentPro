@@ -62,6 +62,16 @@ class _MemItems extends ItemRepo {
     for (final r in rows)
       if (r.category.isNotEmpty) r.category,
   ];
+
+  // no pictures here: these tests are about the other fields
+  @override
+  Future<List<ItemPhoto>> photosOf(int itemId) async => const [];
+
+  @override
+  Future<Map<int, String>> covers() async => const {};
+
+  @override
+  Future<void> setPhotoOrder(int itemId, List<int> ids) async {}
 }
 
 class _MemCustomers extends CustomerRepo {

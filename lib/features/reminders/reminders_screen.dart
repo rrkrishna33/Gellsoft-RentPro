@@ -8,9 +8,12 @@ import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
 import '../../data/reminders.dart';
 import '../../l10n/strings.dart';
+import '../../subscription/gates.dart';
+import '../../subscription/plan.dart';
 import '../bookings/booking_detail_screen.dart';
 import '../bookings/messages.dart';
 import '../common/widgets.dart';
+import 'bulk_reminders_screen.dart';
 
 /// "Today": what to send, what is due back, what is late and who still owes
 /// money, each with a button that opens WhatsApp with the message ready.
@@ -23,7 +26,26 @@ class RemindersScreen extends ConsumerWidget {
     final service =
         ref.watch(profileProvider).valueOrNull?.type.isService ?? false;
     return Scaffold(
-      appBar: AppBar(title: Text(tr('Reminders'))),
+      appBar: AppBar(
+        title: Text(tr('Reminders')),
+        actions: [
+          IconButton(
+            tooltip: tr('Remind everyone who owes'),
+            icon: const Icon(Icons.campaign_outlined),
+            onPressed: () async {
+              if (!await requirePro(context, ref, ProFeature.bulkReminders)) {
+                return;
+              }
+              if (!context.mounted) return;
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const BulkRemindersScreen(),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       body: AuroraBackground(
         child: async.when(
           loading: () => const Center(child: CircularProgressIndicator()),

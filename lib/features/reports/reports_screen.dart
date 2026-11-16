@@ -10,6 +10,10 @@ import '../../data/csv_export.dart';
 import '../../data/report_repo.dart';
 import '../../data/staff.dart';
 import '../../l10n/strings.dart';
+import '../../subscription/entitlement.dart';
+import '../../subscription/gates.dart';
+import '../../subscription/plan.dart';
+import '../../subscription/pro_prompt.dart';
 import '../common/widgets.dart';
 
 enum _Period { today, month, lastMonth, year, custom }
@@ -24,6 +28,42 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   _Period _period = _Period.month;
+
+  /// Bookings by the person who made them. Shown when somebody is named on
+  /// the bookings of the span; the list itself is part of Pro.
+  List<Widget> _staffSection(BuildContext context) {
+    final people = ref.watch(reportStaffProvider).valueOrNull ?? const [];
+    if (!people.any((p) => p.name.isNotEmpty)) return const [];
+    final isPro = ref.watch(isProProvider);
+    return [
+      const SizedBox(height: 18),
+      _Title(tr('Bookings by person')),
+      Card(
+        child: isPro
+            ? Column(
+                children: [
+                  for (final p in people)
+                    ListTile(
+                      title: Text(p.name.isEmpty ? tr('Not recorded') : p.name),
+                      subtitle: Text(
+                        '${tr('{n} bookings', {'n': p.count})} · ${tr('Paid so far {amount}', {'amount': money(p.paid)})}',
+                      ),
+                      trailing: Text(
+                        money(p.amount),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                ],
+              )
+            : ListTile(
+                leading: const Icon(Icons.lock_outline),
+                title: Text(tr('Bookings made by each person')),
+                subtitle: Text(tr('Part of Pro')),
+                onTap: () => showProPrompt(context, ProFeature.staffReport),
+              ),
+      ),
+    ];
+  }
 
   String _label(_Period p) => switch (p) {
     _Period.today => tr('Today'),
@@ -64,6 +104,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   }
 
   Future<void> _export() async {
+    if (!await requirePro(context, ref, ProFeature.export)) return;
+    if (!mounted) return;
     final kind = await showModalBottomSheet<CsvKind>(
       context: context,
       showDragHandle: true,
@@ -274,6 +316,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                       ),
                     ),
                   ],
+                  ..._staffSection(context),
                   if (s.bookings == 0 && s.collected == 0)
                     Padding(
                       padding: const EdgeInsets.only(top: 24),

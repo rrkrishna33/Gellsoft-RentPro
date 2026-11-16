@@ -97,13 +97,22 @@ class _UpgradeBody extends ConsumerWidget {
       tr('Automatic daily backup to Google Drive'),
       tr('More than one shop, each kept separately'),
       tr('Staff logins (Admin, Staff, Cashier)'),
+      tr('Availability calendar'),
+      tr('Late fee and damage charges'),
+      tr('Staff-wise booking report'),
+      tr('Your logo on invoices and receipts'),
+      tr('Export to Excel (CSV) and GSTR-1 sheets'),
+      tr('Remind everyone who owes in one go'),
+      tr('More pictures of each item'),
+      tr('Share a catalog of your items'),
     ];
     final freeItems = [
       tr('{n} new bookings every month', {'n': FreePlan.bookingsPerMonth}),
       tr('{n} photos on each booking', {'n': FreePlan.photosPerBooking}),
+      tr('{n} picture of each item', {'n': FreePlan.photosPerItem}),
       tr('Items, customers, invoices and GST'),
       tr('WhatsApp messages and reminders to customers'),
-      tr('Reports and export to Excel (CSV)'),
+      tr('Reports on screen'),
       tr('Backup and restore, Tamil and English'),
     ];
 

@@ -5,10 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
 import '../../core/terms.dart';
 import '../../data/business_profile.dart';
+import '../../data/booking_repo.dart' show BookingException;
 import '../../data/models.dart';
+import '../../data/photo_store.dart';
 import '../../data/repositories.dart';
 import '../../l10n/strings.dart';
+import '../../subscription/entitlement.dart';
+import '../../subscription/plan.dart';
+import '../../subscription/pro_prompt.dart';
 import '../common/widgets.dart';
+import 'item_photo_strip.dart';
 
 /// Marks "type my own category" in the category list.
 const _ownCategory = '\u0000own';
@@ -51,16 +57,149 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
   bool _typing = false;
   bool _saving = false;
 
+  /// The pictures as they are on screen, the cover first. [id] is null for
+  /// one picked in this visit that is not saved yet.
+  final List<({int? id, String path})> _photos = [];
+
+  /// Saved pictures taken off in this visit; removed for good on Save.
+  final List<({int id, String path})> _removed = [];
+
+  /// Files picked in this visit; deleted again if the page is left unsaved.
+  final List<String> _picked = [];
+  bool _kept = false;
+
   @override
   void initState() {
     super.initState();
     ref.read(itemRepoProvider).categoriesInUse().then((c) {
       if (mounted) setState(() => _used = c);
     });
+    final id = widget.item?.id;
+    if (id != null) {
+      ref.read(itemRepoProvider).photosOf(id).then((list) {
+        if (mounted) {
+          setState(() {
+            _photos
+              ..clear()
+              ..addAll([for (final p in list) (id: p.id, path: p.path)]);
+          });
+        }
+      });
+    }
+  }
+
+  int get _limit => ref.read(isProProvider) ? proPhotosPerItem : FreePlan.photosPerItem;
+
+  Future<void> _addPicture() async {
+    final room = _limit - _photos.length;
+    if (room <= 0) {
+      // the free plan's picture is used: Pro keeps more
+      if (!ref.read(isProProvider)) {
+        await showProPrompt(context, ProFeature.itemPhotos);
+      }
+      return;
+    }
+    final camera = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: Text(tr('Take a photo')),
+              onTap: () => Navigator.pop(ctx, true),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(tr('Choose from the gallery')),
+              onTap: () => Navigator.pop(ctx, false),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (camera == null || !mounted) return;
+    final List<String> got;
+    if (camera) {
+      final one = await PhotoStore.take(camera: true, maxWidth: 1200);
+      got = [?one];
+    } else {
+      got = await PhotoStore.takeMany(limit: room, maxWidth: 1200);
+    }
+    if (!mounted) {
+      for (final path in got) {
+        await PhotoStore.delete(path);
+      }
+      return;
+    }
+    // only as many as fit; a picker that returned more has the rest dropped
+    final keep = got.take(room).toList();
+    for (final path in got.skip(room)) {
+      await PhotoStore.delete(path);
+    }
+    setState(() {
+      for (final path in keep) {
+        _picked.add(path);
+        _photos.add((id: null, path: path));
+      }
+    });
+    if (got.length > room && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            tr('Only {n} pictures fit. The rest were left out.', {'n': room}),
+          ),
+        ),
+      );
+    }
+  }
+
+  void _removePicture(int i) {
+    final p = _photos[i];
+    setState(() {
+      _photos.removeAt(i);
+      if (p.id != null) _removed.add((id: p.id!, path: p.path));
+    });
+  }
+
+  void _makeCover(int i) => setState(() {
+    final p = _photos.removeAt(i);
+    _photos.insert(0, p);
+  });
+
+  /// Writes the picture changes once the item itself is saved.
+  Future<void> _savePictures(int itemId) async {
+    final repo = ref.read(itemRepoProvider);
+    final isPro = ref.read(isProProvider);
+    for (final r in _removed) {
+      await repo.removePhoto(r.id);
+      await PhotoStore.delete(r.path);
+    }
+    final order = <int>[];
+    for (final p in _photos) {
+      if (p.id != null) {
+        order.add(p.id!);
+        continue;
+      }
+      try {
+        order.add(await repo.addPhoto(itemId, p.path, isPro: isPro));
+      } on BookingException {
+        await PhotoStore.delete(p.path); // over the limit: not kept
+      }
+    }
+    await repo.setPhotoOrder(itemId, order);
+    _kept = true;
   }
 
   @override
   void dispose() {
+    if (!_kept) {
+      for (final path in _picked) {
+        PhotoStore.delete(path);
+      }
+    }
     for (final c in [
       _name,
       _category,
@@ -122,7 +261,8 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
       status: _status,
       createdAt: old?.createdAt ?? DateTime.now(),
     );
-    await ref.read(itemRepoProvider).save(item);
+    final savedId = await ref.read(itemRepoProvider).save(item);
+    await _savePictures(savedId);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -169,6 +309,16 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
             16 + MediaQuery.paddingOf(context).bottom,
           ),
           children: [
+            ItemPhotoStrip(
+              paths: [for (final p in _photos) p.path],
+              canAddMore: _photos.length < _limit,
+              locked: _photos.length >= FreePlan.photosPerItem &&
+                  !ref.watch(isProProvider),
+              onAdd: _addPicture,
+              onRemove: _removePicture,
+              onMakeCover: _makeCover,
+            ),
+            const SizedBox(height: 16),
             TextFormField(
               controller: _name,
               textCapitalization: TextCapitalization.words,

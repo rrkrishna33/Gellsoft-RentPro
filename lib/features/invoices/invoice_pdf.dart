@@ -91,8 +91,11 @@ Future<Uint8List> buildInvoicePdf({
 
   /// The appointment time of a service booking ("14:30"), printed with the date.
   String eventTime = '',
+
+  /// The logo is part of Pro: pass false to leave it off.
+  bool showLogo = true,
 }) async {
-  final logo = await shop.logoBytes();
+  final logo = showLogo ? await shop.logoBytes() : null;
   Future<Uint8List> build(Uint8List? picture) => _invoicePdf(
     shop: shop,
     inv: invoice,
@@ -383,8 +386,11 @@ Future<Uint8List> buildReceiptPdf({
   required BusinessProfile shop,
   required Booking booking,
   required Payment payment,
+
+  /// The logo is part of Pro: pass false to leave it off.
+  bool showLogo = true,
 }) async {
-  final logo = await shop.logoBytes();
+  final logo = showLogo ? await shop.logoBytes() : null;
   if (logo == null) return _receiptPdf(shop, booking, payment, null);
   try {
     return await _receiptPdf(shop, booking, payment, logo);

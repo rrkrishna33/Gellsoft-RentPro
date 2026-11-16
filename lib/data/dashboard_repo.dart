@@ -68,15 +68,15 @@ class DashboardRepo {
     return DashboardCounts(
       pickupsToday: await count("status = 'booked' AND pickup_date = ?", [t]),
       returnsToday: await count(
-        "status = 'picked_up' AND return_date = ?",
+        "status IN ('picked_up', 'dispatched') AND return_date = ?",
         [t],
       ),
       overdueReturns: await count(
-        "status = 'picked_up' AND return_date < ?",
+        "status IN ('picked_up', 'dispatched') AND return_date < ?",
         [t],
       ),
       eventsThisWeek: await count(
-        "status IN ('booked', 'picked_up') AND event_date >= ? AND event_date <= ?",
+        "status IN ('booked', 'picked_up', 'dispatched') AND event_date >= ? AND event_date <= ?",
         [t, weekEnd],
       ),
       balanceDue: (due.first['due'] as num?)?.toDouble() ?? 0,

@@ -70,4 +70,29 @@ String _why(ProFeature f) => switch (f) {
     'Running more than one shop, each with its own data, is part of Pro.',
   ),
   ProFeature.staff => tr('Staff logins with their own PINs are part of Pro.'),
+  ProFeature.calendar => tr(
+    'The calendar that shows which days your items are booked is part of Pro.',
+  ),
+  ProFeature.charges => tr(
+    'Adding late fees and damage charges to a booking is part of Pro.',
+  ),
+  ProFeature.staffReport => tr(
+    'The report of bookings made by each person is part of Pro.',
+  ),
+  ProFeature.logo => tr(
+    'Putting your own logo on invoices and receipts is part of Pro.',
+  ),
+  ProFeature.export => tr(
+    'Exporting spreadsheets, including the sheets for your accountant, is part of Pro.',
+  ),
+  ProFeature.bulkReminders => tr(
+    'Reminding everyone who owes money in one go is part of Pro.',
+  ),
+  ProFeature.itemPhotos => tr(
+    'The free plan keeps {n} picture of each item. Pro keeps up to {max}.',
+    {'n': FreePlan.photosPerItem, 'max': proPhotosPerItem},
+  ),
+  ProFeature.catalog => tr(
+    'Sharing a catalog of your items with their pictures is part of Pro.',
+  ),
 };

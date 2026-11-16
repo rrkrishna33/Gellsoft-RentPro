@@ -15,6 +15,9 @@ import '../../data/invoice_repo.dart';
 import '../../data/reminders.dart';
 import '../../data/staff.dart';
 import '../../l10n/strings.dart';
+import '../../subscription/entitlement.dart';
+import '../../subscription/gates.dart';
+import '../../subscription/plan.dart';
 import '../common/widgets.dart';
 import '../invoices/invoice_detail_screen.dart';
 import '../invoices/invoice_pdf.dart';
@@ -44,6 +47,9 @@ class BookingDetailScreen extends ConsumerWidget {
     }
     ref.invalidate(bookingProvider(bookingId));
     ref.invalidate(bookingsProvider);
+    // a charge changes the invoice of the booking too
+    ref.invalidate(bookingInvoiceProvider(bookingId));
+    ref.invalidate(invoicesProvider);
   }
 
   @override
@@ -115,7 +121,12 @@ class BookingDetailScreen extends ConsumerWidget {
 
         Future<void> receipt(Payment p, {required bool send}) async {
           if (shop == null) return;
-          final bytes = await buildReceiptPdf(shop: shop, booking: b, payment: p);
+          final bytes = await buildReceiptPdf(
+            shop: shop,
+            booking: b,
+            payment: p,
+            showLogo: ref.read(isProProvider),
+          );
           if (send) {
             await sendPdfOnWhatsApp(
               bytes: bytes,
@@ -130,7 +141,7 @@ class BookingDetailScreen extends ConsumerWidget {
 
         ReminderKind? remindKind() => switch (b.status) {
           BookingStatus.booked => ReminderKind.sendItems,
-          BookingStatus.pickedUp =>
+          BookingStatus.pickedUp || BookingStatus.dispatched =>
             b.isOverdue(dayOf(DateTime.now()))
                 ? ReminderKind.overdue
                 : ReminderKind.returnDue,
@@ -160,7 +171,123 @@ class BookingDetailScreen extends ConsumerWidget {
         Future<void> pickUp() => _run(context, ref, () => repo.markPickedUp(b.id));
         Future<void> done() => _run(context, ref, () => repo.markDone(b.id));
 
+        Future<void> dispatch() async {
+          final c = await showDialog<_CourierInput>(
+            context: context,
+            builder: (_) => const _CourierDialog(dispatching: true),
+          );
+          if (c == null || !context.mounted) return;
+          await _run(
+            context,
+            ref,
+            () => repo.markDispatched(
+              b.id,
+              courierName: c.name,
+              courierNo: c.number,
+            ),
+          );
+        }
+
+        Future<void> editCourier() async {
+          final c = await showDialog<_CourierInput>(
+            context: context,
+            builder: (_) => _CourierDialog(
+              dispatching: false,
+              name: b.courierName,
+              number: b.courierNo,
+            ),
+          );
+          if (c == null || !context.mounted) return;
+          await _run(
+            context,
+            ref,
+            () => repo.updateCourier(
+              b.id,
+              courierName: c.name,
+              courierNo: c.number,
+            ),
+          );
+        }
+
+        Future<void> addCharge({
+          ChargeKind kind = ChargeKind.damage,
+          String note = '',
+        }) async {
+          if (!await requirePro(context, ref, ProFeature.charges)) return;
+          if (!context.mounted) return;
+          final c = await showDialog<_ChargeInput>(
+            context: context,
+            builder: (_) => _ChargeDialog(kind: kind, note: note),
+          );
+          if (c == null || !context.mounted) return;
+          await _run(
+            context,
+            ref,
+            () => repo.addCharge(
+              b.id,
+              kind: c.kind,
+              amount: c.amount,
+              note: c.note,
+            ),
+          );
+        }
+
+        Future<void> removeCharge(BookingCharge c) async {
+          final paidBack = b.rentPaid - (b.payable - c.amount);
+          final ok = await confirmRemove(
+            context,
+            title: tr('Remove this charge?'),
+            message: paidBack > 0.005
+                ? tr(
+                    'The customer has already paid this. It is taken off, and a refund of {amount} is noted in the payments. Please give that money back to them.',
+                    {'amount': money(paidBack)},
+                  )
+                : tr(
+                    'It is taken off what the customer owes. Use this if it was added by mistake or you decide not to charge it.',
+                  ),
+            action: tr('Remove'),
+          );
+          if (ok && context.mounted) {
+            await _run(context, ref, () => repo.removeCharge(c.id));
+          }
+        }
+
         Future<void> back() async {
+          // late: offer a late fee before the items are booked in
+          final today = dayOf(DateTime.now());
+          if (b.isOverdue(today) && ref.read(isProProvider)) {
+            final days = today.difference(b.returnDate).inDays;
+            final fee = await showDialog<bool>(
+              context: context,
+              builder: (_) => AlertDialog(
+                title: Text(tr('Returned late')),
+                content: Text(
+                  tr(
+                    'These items are {n} days late. Add a late fee for them?',
+                    {'n': days},
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: Text(tr('No late fee')),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: Text(tr('Add late fee')),
+                  ),
+                ],
+              ),
+            );
+            if (fee == null || !context.mounted) return;
+            if (fee) {
+              await addCharge(
+                kind: ChargeKind.late,
+                note: tr('{n} days late', {'n': days}),
+              );
+              if (!context.mounted) return;
+            }
+          }
           // the deposit is handed back as the items come in
           if (b.depositHeld > 0) {
             final p = await showDialog<_PaymentInput>(
@@ -259,6 +386,43 @@ class BookingDetailScreen extends ConsumerWidget {
                       ),
                   ],
                 ),
+                if (b.status == BookingStatus.dispatched ||
+                    b.courierName.isNotEmpty ||
+                    b.courierNo.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _Card(
+                    title: tr('Courier'),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          children: [
+                            if (b.dispatchedAt != null)
+                              _row(context, tr('Sent on'), dateText(b.dispatchedAt!)),
+                            _row(
+                              context,
+                              tr('Courier'),
+                              b.courierName.isEmpty ? '-' : b.courierName,
+                            ),
+                            _row(
+                              context,
+                              tr('Tracking number'),
+                              b.courierNo.isEmpty ? '-' : b.courierNo,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (perms.can(Permission.book) &&
+                          (b.status == BookingStatus.dispatched ||
+                              b.status == BookingStatus.returned))
+                        _action(
+                          Icons.edit_outlined,
+                          tr('Change courier details'),
+                          editCourier,
+                        ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 16),
                 PhotosSection(booking: b),
                 const SizedBox(height: 16),
@@ -278,6 +442,12 @@ class BookingDetailScreen extends ConsumerWidget {
                             ),
                           if (b.taxTotal > 0)
                             _row(context, tr('GST'), money(b.taxTotal)),
+                          for (final c in b.charges)
+                            _row(
+                              context,
+                              chargeLineName(c.kind, c.note),
+                              money(c.amount),
+                            ),
                           _row(context, tr('Total'), money(b.payable), bold: true),
                           _row(context, tr('Paid'), money(b.rentPaid)),
                           const Divider(height: 20),
@@ -327,6 +497,27 @@ class BookingDetailScreen extends ConsumerWidget {
                         tr('Give deposit back'),
                         () => take(PaymentKind.refund),
                       ),
+                    if (perms.can(Permission.collectPayments) &&
+                        !service &&
+                        (b.status.isOut || b.status == BookingStatus.returned))
+                      _action(
+                        Icons.add_card_outlined,
+                        tr('Add late fee or damage charge'),
+                        addCharge,
+                      ),
+                    if (perms.can(Permission.collectPayments))
+                      for (final c in b.charges)
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.remove_circle_outline),
+                          title: Text(
+                            tr('Remove {what}', {
+                              'what': chargeLineName(c.kind, c.note),
+                            }),
+                          ),
+                          trailing: Text(money(c.amount)),
+                          onTap: () => removeCharge(c),
+                        ),
                   ],
                 ),
                 if (b.status != BookingStatus.cancelled) ...[
@@ -371,6 +562,12 @@ class BookingDetailScreen extends ConsumerWidget {
                           ? null
                           : whatsApp(confirmationMessage(b, shop)),
                     ),
+                    if (b.status == BookingStatus.dispatched && shop != null)
+                      _action(
+                        Icons.local_shipping_outlined,
+                        tr('Send courier details on WhatsApp'),
+                        () => whatsApp(dispatchMessage(b, shop)),
+                      ),
                     if (remindKind() != null && shop != null)
                       _action(
                         Icons.notifications_active_outlined,
@@ -429,6 +626,7 @@ class BookingDetailScreen extends ConsumerWidget {
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
+                              if (p.amount > 0)
                               PopupMenuButton<String>(
                                 tooltip: tr('Receipt'),
                                 icon: const Icon(Icons.receipt_outlined),
@@ -480,8 +678,17 @@ class BookingDetailScreen extends ConsumerWidget {
                           icon: const Icon(Icons.outbox_outlined),
                           label: Text(tr('Mark as picked up')),
                         ),
-                if (b.status == BookingStatus.pickedUp &&
-                    perms.can(Permission.book))
+                if (b.status == BookingStatus.booked &&
+                    !service &&
+                    perms.can(Permission.book)) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: dispatch,
+                    icon: const Icon(Icons.local_shipping_outlined),
+                    label: Text(tr('Dispatch by courier')),
+                  ),
+                ],
+                if (b.status.isOut && perms.can(Permission.book))
                   FilledButton.icon(
                     onPressed: back,
                     icon: const Icon(Icons.move_to_inbox_outlined),
@@ -657,6 +864,168 @@ class _Header extends StatelessWidget {
       ),
     );
   }
+}
+
+class _CourierInput {
+  const _CourierInput(this.name, this.number);
+  final String name;
+  final String number;
+}
+
+/// Courier name and tracking number, both optional.
+class _CourierDialog extends StatefulWidget {
+  const _CourierDialog({
+    required this.dispatching,
+    this.name = '',
+    this.number = '',
+  });
+
+  /// true when the items are being sent now; false when only correcting.
+  final bool dispatching;
+  final String name;
+  final String number;
+
+  @override
+  State<_CourierDialog> createState() => _CourierDialogState();
+}
+
+class _CourierDialogState extends State<_CourierDialog> {
+  late final _name = TextEditingController(text: widget.name);
+  late final _number = TextEditingController(text: widget.number);
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _number.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      widget.dispatching ? tr('Dispatch by courier') : tr('Courier details'),
+    ),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _name,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: InputDecoration(labelText: tr('Courier name (optional)')),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _number,
+            decoration: InputDecoration(
+              labelText: tr('Courier booking number (optional)'),
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: Text(tr('Cancel')),
+      ),
+      FilledButton(
+        style: FilledButton.styleFrom(minimumSize: const Size(64, 44)),
+        onPressed: () =>
+            Navigator.pop(context, _CourierInput(_name.text, _number.text)),
+        child: Text(widget.dispatching ? tr('Mark as dispatched') : tr('Save')),
+      ),
+    ],
+  );
+}
+
+class _ChargeInput {
+  const _ChargeInput(this.kind, this.amount, this.note);
+  final ChargeKind kind;
+  final double amount;
+  final String note;
+}
+
+/// A late-return or damage charge: what for, how much, and a note.
+class _ChargeDialog extends StatefulWidget {
+  const _ChargeDialog({required this.kind, this.note = ''});
+  final ChargeKind kind;
+  final String note;
+
+  @override
+  State<_ChargeDialog> createState() => _ChargeDialogState();
+}
+
+class _ChargeDialogState extends State<_ChargeDialog> {
+  late ChargeKind _kind = widget.kind;
+  final _amount = TextEditingController();
+  late final _note = TextEditingController(text: widget.note);
+  String? _error;
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  void _ok() {
+    final v = parseAmount(_amount.text);
+    if (v <= 0) {
+      setState(() => _error = tr('Enter an amount.'));
+      return;
+    }
+    Navigator.pop(context, _ChargeInput(_kind, v, _note.text));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(tr('Add a charge')),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DropdownButtonFormField<ChargeKind>(
+            initialValue: _kind,
+            isExpanded: true,
+            decoration: InputDecoration(labelText: tr('What for')),
+            items: [
+              for (final k in ChargeKind.values)
+                DropdownMenuItem(value: k, child: Text(k.label)),
+            ],
+            onChanged: (k) => setState(() => _kind = k ?? _kind),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _amount,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: tr('Amount (₹)'),
+              errorText: _error,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _note,
+            decoration: InputDecoration(labelText: tr('Note (optional)')),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: Text(tr('Cancel')),
+      ),
+      FilledButton(
+        style: FilledButton.styleFrom(minimumSize: const Size(64, 44)),
+        onPressed: _ok,
+        child: Text(tr('Save')),
+      ),
+    ],
+  );
 }
 
 class _PaymentInput {

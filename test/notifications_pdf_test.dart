@@ -661,6 +661,38 @@ void main() {
       expect(latin1.decode(receipt.sublist(0, 5)), '%PDF-');
     });
 
+    test('without Pro the logo is left off the invoice and the receipt', () async {
+      final dir = Directory.systemTemp.createTempSync('rentpro_prologo');
+      addTearDown(() {
+        PhotoStore.folderOverride = null;
+        dir.deleteSync(recursive: true);
+      });
+      PhotoStore.folderOverride = dir;
+      File('${dir.path}/aaaaaaaa-0009.png').writeAsBytesSync(tinyPng);
+      final withLogo = shop.copyWith(logoName: 'aaaaaaaa-0009.png');
+      final plain = await buildInvoicePdf(shop: shop, invoice: inv());
+      final hidden = await buildInvoicePdf(
+        shop: withLogo,
+        invoice: inv(),
+        showLogo: false,
+      );
+      final shown = await buildInvoicePdf(shop: withLogo, invoice: inv());
+      expect(hidden.length, plain.length, reason: 'no picture in the file');
+      expect(shown.length, isNot(plain.length));
+      final r1 = await buildReceiptPdf(
+        shop: shop,
+        booking: booking(),
+        payment: pay(PaymentKind.advance),
+      );
+      final r2 = await buildReceiptPdf(
+        shop: withLogo,
+        booking: booking(),
+        payment: pay(PaymentKind.advance),
+        showLogo: false,
+      );
+      expect(r2.length, r1.length);
+    });
+
     test('a logo that is not a picture does not stop the invoice or receipt', () async {
       final dir = Directory.systemTemp.createTempSync('rentpro_badlogo');
       addTearDown(() {

@@ -7,7 +7,10 @@ import '../../data/booking_models.dart';
 import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
 import '../../l10n/strings.dart';
+import '../../subscription/gates.dart';
+import '../../subscription/plan.dart';
 import '../common/widgets.dart';
+import 'availability_calendar_screen.dart';
 import 'booking_detail_screen.dart';
 
 /// All bookings, by stage, with a search box.
@@ -31,12 +34,33 @@ class BookingsScreen extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-          child: Text(
-            tr('Bookings'),
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+          padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  tr('Bookings'),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: tr('Availability calendar'),
+                icon: const Icon(Icons.calendar_month_outlined),
+                onPressed: () async {
+                  if (!await requirePro(context, ref, ProFeature.calendar)) {
+                    return;
+                  }
+                  if (!context.mounted) return;
+                  await Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AvailabilityCalendarScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
         ),
         Padding(
@@ -90,6 +114,9 @@ class BookingsScreen extends ConsumerWidget {
                             service
                                 ? tr('Finished appointments will appear here.')
                                 : tr('Returned bookings will appear here.'),
+                          BookingFilter.due => tr(
+                            'Nobody owes you anything right now.',
+                          ),
                           BookingFilter.cancelled => tr(
                             'Cancelled bookings will appear here.',
                           ),
@@ -121,6 +148,12 @@ class BookingsScreen extends ConsumerWidget {
     );
   }
 }
+
+/// "DTDC · 12345" for a dispatched booking; either part can be missing.
+String courierLine(Booking b) => [
+  if (b.courierName.isNotEmpty) b.courierName,
+  if (b.courierNo.isNotEmpty) b.courierNo,
+].join(' · ');
 
 /// One booking in a list: who, when, what, and what is still due.
 class BookingTile extends StatelessWidget {
@@ -185,6 +218,7 @@ class BookingTile extends StatelessWidget {
                         color: switch (b.status) {
                           BookingStatus.booked => Theme.of(context).colorScheme.primary,
                           BookingStatus.pickedUp => Palette.warning,
+                          BookingStatus.dispatched => Palette.warning,
                           BookingStatus.returned => Palette.success,
                           BookingStatus.cancelled => Theme.of(context).colorScheme.onSurfaceVariant,
                         },
@@ -224,6 +258,25 @@ class BookingTile extends StatelessWidget {
                       ),
                   ],
                 ),
+                if (b.status == BookingStatus.dispatched &&
+                    (b.courierName.isNotEmpty || b.courierNo.isNotEmpty))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.local_shipping_outlined, size: 16),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            courierLine(b),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),

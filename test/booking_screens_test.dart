@@ -168,7 +168,7 @@ void main() {
     await t.tap(find.text('open'));
     await settle(t);
     expect(find.text('New booking'), findsOneWidget);
-    expect(find.text('12 free bookings left this month.'), findsOneWidget);
+    expect(find.text('${FreePlan.bookingsPerMonth} free bookings left this month.'), findsOneWidget);
 
     // saving with nothing chosen says what is missing
     await t.scrollUntilVisible(
@@ -264,7 +264,7 @@ void main() {
     });
     await t.pumpWidget(host(const BookingFormScreen()));
     await settle(t);
-    expect(find.textContaining('used all 12 free bookings'), findsOneWidget);
+    expect(find.textContaining('used all ${FreePlan.bookingsPerMonth} free bookings'), findsOneWidget);
     await t.tap(find.text('Choose the customer'));
     await settle(t);
     await t.tap(find.text('Anu').last);

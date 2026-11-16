@@ -34,7 +34,7 @@ class PhotoStore {
   /// Asks for a photo (camera, or the gallery when [camera] is false) and
   /// copies it into the app's folder. Returns the saved path, or null when the
   /// user cancelled.
-  static Future<String?> take({bool camera = true}) async {
+  static Future<String?> take({bool camera = true, int maxWidth = 1600}) async {
     final hook = picker;
     final String? source;
     if (hook != null) {
@@ -43,7 +43,7 @@ class PhotoStore {
       final shot = await ImagePicker().pickImage(
         source: camera ? ImageSource.camera : ImageSource.gallery,
         // big enough to see a stain, small enough to keep many on the phone
-        maxWidth: 1600,
+        maxWidth: maxWidth.toDouble(),
         imageQuality: 80,
       );
       source = shot?.path;
@@ -89,14 +89,14 @@ class PhotoStore {
   /// they like). [limit] stops the picker at that many when it is known.
   /// Each is copied into the app's folder; returns the saved paths, empty
   /// when the user cancels.
-  static Future<List<String>> takeMany({int? limit}) async {
+  static Future<List<String>> takeMany({int? limit, int maxWidth = 1600}) async {
     final hook = manyPicker;
     final List<String> sources;
     if (hook != null) {
       sources = await hook();
     } else {
       final shots = await ImagePicker().pickMultiImage(
-        maxWidth: 1600,
+        maxWidth: maxWidth.toDouble(),
         imageQuality: 80,
         limit: limit != null && limit >= 2 ? limit : null,
       );

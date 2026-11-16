@@ -195,7 +195,10 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
               controller: _notes,
               maxLines: 3,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(labelText: tr('Notes (optional)')),
+              decoration: InputDecoration(
+                labelText: tr('Notes (optional)'),
+                helperText: tr('Preferences, measurements, anything to remember'),
+              ),
             ),
             const SizedBox(height: 24),
             FilledButton(

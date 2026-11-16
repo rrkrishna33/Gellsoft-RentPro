@@ -8,6 +8,7 @@ import '../../data/staff.dart';
 import '../../l10n/strings.dart';
 import '../common/widgets.dart';
 import 'customer_form_screen.dart';
+import 'customer_history_screen.dart';
 
 /// The shop's customers, with a search box and an add button.
 class CustomersScreen extends ConsumerWidget {
@@ -146,7 +147,15 @@ class _CustomerTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                const Icon(Icons.chevron_right),
+                IconButton(
+                  tooltip: tr('Bookings of this customer'),
+                  icon: const Icon(Icons.history),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => CustomerHistoryScreen(customer: customer),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

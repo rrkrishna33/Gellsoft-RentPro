@@ -47,6 +47,19 @@ class CustomerSales {
   final double amount;
 }
 
+/// Bookings made by one person (the signed-in person who made them; '' when
+/// staff logins were off).
+class StaffSales {
+  const StaffSales(this.name, this.count, this.amount, this.paid);
+  final String name;
+  final int count;
+  final double amount;
+
+  /// Rent paid so far on those bookings, whenever it was paid (not only in
+  /// the span), after any refund of a removed charge.
+  final double paid;
+}
+
 /// The figures on the Reports page for a span of days. Bookings are placed in
 /// the span by their event date; cancelled bookings are left out of money.
 class ReportSummary {
@@ -85,6 +98,33 @@ class ReportSummary {
 }
 
 class ReportRepo {
+  /// Bookings in the span (by event date, cancelled left out) grouped by who
+  /// made them, biggest first.
+  Future<List<StaffSales>> byStaff(DateRange r) async {
+    final d = await AppDatabase.instance.db;
+    final rows = await d.rawQuery(
+      '''
+      SELECT b.created_by AS who, COUNT(*) AS c, COALESCE(SUM(b.payable), 0) AS amt,
+             COALESCE(SUM((SELECT SUM(p.amount) FROM payments p
+               WHERE p.booking_id = b.id AND p.kind IN ('advance','balance'))), 0) AS got
+      FROM bookings b
+      WHERE b.deleted = 0 AND b.status != 'cancelled'
+        AND b.event_date >= ? AND b.event_date < ?
+      GROUP BY b.created_by ORDER BY amt DESC, c DESC
+    ''',
+      [r.from.millisecondsSinceEpoch, r.to.millisecondsSinceEpoch],
+    );
+    return [
+      for (final x in rows)
+        StaffSales(
+          (x['who'] as String?) ?? '',
+          x['c'] as int,
+          (x['amt'] as num).toDouble(),
+          (x['got'] as num).toDouble(),
+        ),
+    ];
+  }
+
   Future<ReportSummary> summary(DateRange r) async {
     final d = await AppDatabase.instance.db;
     final args = [r.from.millisecondsSinceEpoch, r.to.millisecondsSinceEpoch];
@@ -159,6 +199,10 @@ class ReportRepo {
 }
 
 final reportRepoProvider = Provider<ReportRepo>((_) => ReportRepo());
+
+final reportStaffProvider = FutureProvider.autoDispose<List<StaffSales>>(
+  (ref) => ref.watch(reportRepoProvider).byStaff(ref.watch(reportRangeProvider)),
+);
 
 /// The span the Reports page is showing.
 final reportRangeProvider = StateProvider.autoDispose<DateRange>(

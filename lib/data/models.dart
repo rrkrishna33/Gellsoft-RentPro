@@ -33,6 +33,28 @@ enum ItemStatus {
       values.firstWhere((s) => s.name == n, orElse: () => ItemStatus.active);
 }
 
+/// One picture of an item. [path] is a file in the app's photo folder.
+class ItemPhoto {
+  final int id;
+  final int itemId;
+  final String path;
+  final int sort;
+
+  const ItemPhoto({
+    required this.id,
+    required this.itemId,
+    required this.path,
+    this.sort = 0,
+  });
+
+  factory ItemPhoto.fromRow(Map<String, Object?> r) => ItemPhoto(
+    id: r['id'] as int,
+    itemId: r['item_id'] as int,
+    path: r['path'] as String,
+    sort: (r['sort'] as int?) ?? 0,
+  );
+}
+
 /// Something the shop rents out.
 class RentItem {
   final int? id;

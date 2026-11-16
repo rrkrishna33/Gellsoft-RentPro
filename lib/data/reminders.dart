@@ -53,7 +53,7 @@ List<ReminderItem> buildReminders(List<Booking> bookings, DateTime now) {
         if (b.balanceDue > 0 && !b.pickupDate.isAfter(tomorrow)) {
           out.add(ReminderItem(ReminderKind.balance, b, b.eventDate));
         }
-      case BookingStatus.pickedUp:
+      case BookingStatus.pickedUp || BookingStatus.dispatched:
         if (b.returnDate.isBefore(today)) {
           out.add(ReminderItem(ReminderKind.overdue, b, b.returnDate));
         } else if (!b.returnDate.isAfter(tomorrow)) {

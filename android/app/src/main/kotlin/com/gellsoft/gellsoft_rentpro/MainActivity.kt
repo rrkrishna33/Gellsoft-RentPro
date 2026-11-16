@@ -80,6 +80,63 @@ class MainActivity : FlutterFragmentActivity() {
                             result.error("send_failed", e.message, null)
                         }
                     }
+                    // Sends pictures of an item on WhatsApp: one picture, several
+                    // pictures, or only the text when there are none. The files are
+                    // read through the same FileProvider (cache/shared only).
+                    "sendImages" -> {
+                        try {
+                            val paths = call.argument<List<String>>("paths") ?: emptyList()
+                            val number = call.argument<String>("number")
+                            val text = call.argument<String>("text") ?: ""
+                            val uris = ArrayList(paths.map {
+                                FileProvider.getUriForFile(
+                                    this,
+                                    "$packageName.fileprovider",
+                                    File(it),
+                                )
+                            })
+                            fun build(pkg: String?, withChat: Boolean): Intent {
+                                val intent = when {
+                                    uris.size > 1 -> Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                                        type = "image/*"
+                                        putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                                    }
+                                    uris.size == 1 -> Intent(Intent.ACTION_SEND).apply {
+                                        type = "image/*"
+                                        putExtra(Intent.EXTRA_STREAM, uris[0])
+                                    }
+                                    else -> Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                    }
+                                }
+                                intent.putExtra(Intent.EXTRA_TEXT, text)
+                                if (withChat && number != null) {
+                                    intent.putExtra("jid", "$number@s.whatsapp.net")
+                                }
+                                if (pkg != null) intent.setPackage(pkg)
+                                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                return intent
+                            }
+                            var how = "chooser"
+                            for (pkg in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+                                try {
+                                    startActivity(build(pkg, true))
+                                    how = "whatsapp"
+                                    break
+                                } catch (e: ActivityNotFoundException) {
+                                    // not installed: try the next one
+                                }
+                            }
+                            if (how == "chooser") {
+                                val chooser = Intent.createChooser(build(null, false), null)
+                                chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                startActivity(chooser)
+                            }
+                            result.success(how)
+                        } catch (e: Exception) {
+                            result.error("send_failed", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
