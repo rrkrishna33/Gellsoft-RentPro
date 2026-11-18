@@ -203,6 +203,23 @@ void main() {
     expect(b.lines.single.label, 'Old gown');
     expect(b.eventTime, '');
     expect(b.createdBy, '');
+    // hourly rent: the new columns arrive through the real upgrade, and what
+    // was there keeps working as a booking by the day
+    expect(await columns('bookings'), containsAll(['pickup_time', 'return_time']));
+    expect(await columns('items'), contains('min_hours'));
+    expect(await columns('booking_items'), contains('hours'));
+    expect(b.pickupTime, '');
+    expect(b.returnTime, '');
+    expect(b.hasHourly, isFalse);
+    expect(b.lines.single.hours, 1);
+    expect(item.minHours, 1);
+    expect(await columns('items'), contains('buffer_hours'));
+    expect(await columns('customers'), contains('warning'));
+    expect(await columns('item_repairs'), contains('cost'));
+    expect(item.bufferHours, 0);
+    expect(item.weekRate, 0);
+    expect(item.statusUntil, isNull);
+    expect(b.trialDate, isNull);
     // and the old booking still blocks its item for its days
     final clash = await BookingRepo().conflicts(
       itemIds: [1],
@@ -215,6 +232,10 @@ void main() {
 
   test('a new install is complete at once, and the upgrade can run twice', () async {
     final d = await AppDatabase.instance.db;
+    // a new install has the hourly-rent columns before any upgrade runs
+    expect(await columns('bookings'), containsAll(['pickup_time', 'return_time']));
+    expect(await columns('items'), contains('min_hours'));
+    expect(await columns('booking_items'), contains('hours'));
     expect(await columns('bookings'), containsAll(['tax_total', 'payable']));
     final version = (await d.rawQuery('PRAGMA user_version')).first.values.first;
     expect(version, AppDatabase.schemaVersion);
@@ -229,16 +250,46 @@ void main() {
     await AppDatabase.instance.migrateTo5ForTest(d);
     await AppDatabase.instance.migrateTo6ForTest(d);
     await AppDatabase.instance.migrateTo6ForTest(d);
+    await AppDatabase.instance.migrateTo7ForTest(d);
+    await AppDatabase.instance.migrateTo7ForTest(d);
+    await AppDatabase.instance.migrateTo8ForTest(d);
+    await AppDatabase.instance.migrateTo8ForTest(d);
+    await AppDatabase.instance.migrateTo9ForTest(d);
+    await AppDatabase.instance.migrateTo9ForTest(d);
+    expect(
+      await columns('items'),
+      containsAll([
+        'buffer_hours',
+        'week_rate',
+        'month_rate',
+        'late_fee',
+        'status_until',
+      ]),
+    );
+    expect(await columns('customers'), contains('warning'));
+    expect(await columns('bookings'), contains('trial_date'));
+    expect(
+      await columns('item_repairs'),
+      containsAll(['item_id', 'note', 'cost', 'at']),
+    );
+    expect(
+      await columns('bookings'),
+      containsAll(['pickup_time', 'return_time']),
+    );
     expect(await columns('item_photos'), containsAll(['item_id', 'path', 'sort']));
     expect(await columns('invoice_items'), contains('charge_id'));
     expect(
       await columns('bookings'),
       containsAll(['courier_name', 'courier_no', 'dispatched_at', 'extra_charges']),
     );
-    expect(await columns('items'), containsAll(['hsn', 'gst_rate', 'quantity']));
+    expect(
+      await columns('items'),
+      containsAll(['hsn', 'gst_rate', 'quantity', 'min_hours']),
+    );
+    expect(await columns('booking_items'), contains('hours'));
   });
 
-  test('the version number moves to 6', () {
-    expect(AppDatabase.schemaVersion, 6);
+  test('the version number moves to 9', () {
+    expect(AppDatabase.schemaVersion, 9);
   });
 }

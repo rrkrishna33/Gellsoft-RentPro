@@ -54,7 +54,10 @@ List<ReminderItem> buildReminders(List<Booking> bookings, DateTime now) {
           out.add(ReminderItem(ReminderKind.balance, b, b.eventDate));
         }
       case BookingStatus.pickedUp || BookingStatus.dispatched:
-        if (b.returnDate.isBefore(today)) {
+        // an hourly booking is overdue the moment its return time passes
+        final due = b.dueBack;
+        final late = due != null ? now.isAfter(due) : b.returnDate.isBefore(today);
+        if (late) {
           out.add(ReminderItem(ReminderKind.overdue, b, b.returnDate));
         } else if (!b.returnDate.isAfter(tomorrow)) {
           out.add(ReminderItem(ReminderKind.returnDue, b, b.returnDate));

@@ -230,10 +230,16 @@ class _AvailabilityCalendarScreenState
                           title: Text('#${b.number}  ${b.customerName}'),
                           subtitle: Text(
                             [
-                              for (final l in b.lines)
-                                if (_itemId == null || l.itemId == _itemId)
-                                  l.label,
-                            ].join(', '),
+                              [
+                                for (final l in b.lines)
+                                  if (_itemId == null || l.itemId == _itemId)
+                                    l.label,
+                              ].join(', '),
+                              if (b.hasHourly &&
+                                  b.pickupTime.isNotEmpty &&
+                                  b.returnTime.isNotEmpty)
+                                '${timeText(b.pickupTime)} - ${timeText(b.returnTime)}',
+                            ].join('\n'),
                           ),
                           trailing: StatusChip(
                             label: b.status.label,

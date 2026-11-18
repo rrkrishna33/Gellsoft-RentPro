@@ -142,12 +142,16 @@ class _ItemTile extends StatelessWidget {
       if (item.size.isNotEmpty) item.size,
       if (!service && item.quantity > 1)
         tr('{n} pieces', {'n': item.quantity}),
+      if (item.rateType.isHourly && item.minHours > 1)
+        tr('Minimum {n} hours', {'n': item.minHours}),
     ].join(' · ');
     final unit = service
         ? tr('a booking')
-        : item.rateType == RateType.day
-        ? tr('a day')
-        : tr('an event');
+        : switch (item.rateType) {
+            RateType.day => tr('a day'),
+            RateType.hour => tr('an hour'),
+            RateType.event => tr('an event'),
+          };
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
@@ -210,7 +214,12 @@ class _ItemTile extends StatelessWidget {
                     if (!item.status.bookable) ...[
                       const SizedBox(height: 4),
                       StatusChip(
-                        label: item.status.label,
+                        label: item.statusUntil == null
+                            ? item.status.label
+                            : tr('{status} until {date}', {
+                                'status': item.status.label,
+                                'date': dateText(item.statusUntil!),
+                              }),
                         color: Palette.warning,
                       ),
                     ],

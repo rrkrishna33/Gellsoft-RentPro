@@ -60,6 +60,22 @@ class StaffSales {
   final double paid;
 }
 
+/// What one item earned in a span and what it cost to keep it going.
+class ItemProfit {
+  const ItemProfit(this.itemId, this.name, this.bookings, this.rent, this.repairs);
+  final int itemId;
+  final String name;
+  final int bookings;
+
+  /// Rent from the bookings in the span (before discount and GST).
+  final double rent;
+
+  /// What was spent on repairs and damage in the span.
+  final double repairs;
+
+  double get profit => rent - repairs;
+}
+
 /// The figures on the Reports page for a span of days. Bookings are placed in
 /// the span by their event date; cancelled bookings are left out of money.
 class ReportSummary {
@@ -123,6 +139,53 @@ class ReportRepo {
           (x['got'] as num).toDouble(),
         ),
     ];
+  }
+
+  /// What each item earned (its rent on bookings with an event in the span,
+  /// cancelled left out) less what its repairs cost in the span, best first.
+  Future<List<ItemProfit>> itemProfit(DateRange r) async {
+    final d = await AppDatabase.instance.db;
+    final from = r.from.millisecondsSinceEpoch, to = r.to.millisecondsSinceEpoch;
+    final rent = await d.rawQuery(
+      '''
+      SELECT bi.item_id AS id, bi.name AS name, COUNT(DISTINCT b.id) AS c,
+             COALESCE(SUM(bi.amount), 0) AS rent
+      FROM booking_items bi JOIN bookings b ON b.id = bi.booking_id
+      WHERE b.deleted = 0 AND b.status != 'cancelled'
+        AND b.event_date >= ? AND b.event_date < ?
+      GROUP BY bi.item_id
+    ''',
+      [from, to],
+    );
+    final repairs = await d.rawQuery(
+      '''
+      SELECT r.item_id AS id, i.name AS name, COALESCE(SUM(r.cost), 0) AS cost
+      FROM item_repairs r JOIN items i ON i.id = r.item_id
+      WHERE r.at >= ? AND r.at < ?
+      GROUP BY r.item_id
+    ''',
+      [from, to],
+    );
+    final cost = {for (final x in repairs) x['id'] as int: (x['cost'] as num).toDouble()};
+    final out = <int, ItemProfit>{};
+    for (final x in rent) {
+      final id = x['id'] as int;
+      out[id] = ItemProfit(
+        id,
+        x['name'] as String,
+        x['c'] as int,
+        (x['rent'] as num).toDouble(),
+        cost[id] ?? 0,
+      );
+    }
+    for (final x in repairs) {
+      final id = x['id'] as int;
+      out.putIfAbsent(
+        id,
+        () => ItemProfit(id, x['name'] as String, 0, 0, (x['cost'] as num).toDouble()),
+      );
+    }
+    return out.values.toList()..sort((a, b) => b.profit.compareTo(a.profit));
   }
 
   Future<ReportSummary> summary(DateRange r) async {
@@ -202,6 +265,11 @@ final reportRepoProvider = Provider<ReportRepo>((_) => ReportRepo());
 
 final reportStaffProvider = FutureProvider.autoDispose<List<StaffSales>>(
   (ref) => ref.watch(reportRepoProvider).byStaff(ref.watch(reportRangeProvider)),
+);
+
+final reportItemProfitProvider = FutureProvider.autoDispose<List<ItemProfit>>(
+  (ref) =>
+      ref.watch(reportRepoProvider).itemProfit(ref.watch(reportRangeProvider)),
 );
 
 /// The span the Reports page is showing.

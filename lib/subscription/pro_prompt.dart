@@ -95,4 +95,22 @@ String _why(ProFeature f) => switch (f) {
   ProFeature.catalog => tr(
     'Sharing a catalog of your items with their pictures is part of Pro.',
   ),
+  ProFeature.agreement => tr(
+    'A printable rental agreement with your terms and signature lines is part of Pro.',
+  ),
+  ProFeature.buffer => tr(
+    'Keeping an item blocked for cleaning or servicing after each return is part of Pro.',
+  ),
+  ProFeature.longRates => tr(
+    'Weekly and monthly rates that apply by themselves are part of Pro.',
+  ),
+  ProFeature.lateRule => tr(
+    'A late fee rate for each item, filled in for you at return, is part of Pro.',
+  ),
+  ProFeature.repairLog => tr(
+    'The repair and damage log of each item is part of Pro.',
+  ),
+  ProFeature.itemProfit => tr(
+    'The profit report for each item is part of Pro.',
+  ),
 };

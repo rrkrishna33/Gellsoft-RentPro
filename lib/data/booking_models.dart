@@ -1,3 +1,4 @@
+import '../core/booking_math.dart';
 import '../l10n/strings.dart';
 import 'models.dart';
 
@@ -38,7 +39,11 @@ enum PaymentKind {
   advance('Advance'),
   balance('Balance'),
   deposit('Deposit'),
-  refund('Refund');
+  refund('Refund'),
+
+  /// Deposit the shop keeps for damage or loss. It leaves the deposit held;
+  /// the same amount is charged on the booking and counted as rent paid.
+  keep('Kept from deposit');
 
   final String en;
   const PaymentKind(this.en);
@@ -76,6 +81,10 @@ class BookingLine {
   /// How many of the item were booked.
   final int qty;
 
+  /// Hours an hourly line was charged for (the booking's hours, or the item's
+  /// minimum when that is more). 1 for a line by the day or event.
+  final int hours;
+
   /// The rate and deposit of ONE piece.
   final double rate;
   final double deposit;
@@ -99,6 +108,7 @@ class BookingLine {
     required this.deposit,
     required this.amount,
     this.qty = 1,
+    this.hours = 1,
     this.hsn = '',
     this.gstRate = 0,
     double? taxable,
@@ -224,6 +234,14 @@ class Booking {
   /// booking has no time.
   final String eventTime;
 
+  /// When the items go out and come back ("14:30") for a booking with an
+  /// hourly item; '' for a booking by the day.
+  final String pickupTime;
+  final String returnTime;
+
+  /// The day of a trial or fitting before the event, or null.
+  final DateTime? trialDate;
+
   /// Who made the booking (the signed-in person), or '' when staff logins
   /// are off.
   final String createdBy;
@@ -264,6 +282,9 @@ class Booking {
     required this.remindDays,
     required this.createdAt,
     this.eventTime = '',
+    this.pickupTime = '',
+    this.returnTime = '',
+    this.trialDate,
     this.createdBy = '',
     this.lines = const [],
     this.payments = const [],
@@ -296,9 +317,12 @@ class Booking {
   double get depositTaken => _sum((p) => p.kind == PaymentKind.deposit);
   double get depositRefunded => _sum((p) => p.kind == PaymentKind.refund);
 
+  /// Deposit the shop kept for damage or loss.
+  double get depositKept => _sum((p) => p.kind == PaymentKind.keep);
+
   /// Deposit the shop is holding right now.
   double get depositHeld {
-    final v = depositTaken - depositRefunded;
+    final v = depositTaken - depositRefunded - depositKept;
     return v < 0.005 ? 0 : v;
   }
 
@@ -308,6 +332,24 @@ class Booking {
     return v < 0.005 ? 0 : v;
   }
 
-  /// The items should be back by now but are still out.
-  bool isOverdue(DateTime today) => status.isOut && returnDate.isBefore(today);
+  /// Whether this booking is charged by the hour for some item.
+  bool get hasHourly => lines.any((l) => l.rateType.isHourly);
+
+  /// Hours the booking runs for, from the pickup time to the return time.
+  int get hours => rentalHours(pickupDate, pickupTime, returnDate, returnTime);
+
+  /// When the hourly items are due back, or null for a booking by the day.
+  DateTime? get dueBack => hasHourly && minutesOfTime(returnTime) != null
+      ? momentOf(returnDate, returnTime)
+      : null;
+
+  /// The items should be back by now but are still out. A booking with an
+  /// hourly item is late as soon as its return time has passed; [now] is only
+  /// needed for that (it defaults to the current time).
+  bool isOverdue(DateTime today, [DateTime? now]) {
+    if (!status.isOut) return false;
+    final due = dueBack;
+    if (due != null) return (now ?? DateTime.now()).isAfter(due);
+    return returnDate.isBefore(today);
+  }
 }

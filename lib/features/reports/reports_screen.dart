@@ -65,6 +65,46 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     ];
   }
 
+  /// What each item earned less its repairs. The list is part of Pro.
+  List<Widget> _profitSection(BuildContext context) {
+    final rows = ref.watch(reportItemProfitProvider).valueOrNull ?? const [];
+    final isPro = ref.watch(isProProvider);
+    if (rows.isEmpty && isPro) return const [];
+    return [
+      const SizedBox(height: 18),
+      _Title(tr('Profit by item')),
+      Card(
+        child: isPro
+            ? Column(
+                children: [
+                  for (final p in rows)
+                    ListTile(
+                      title: Text(p.name),
+                      subtitle: Text(
+                        '${tr('{n} bookings', {'n': p.bookings})} · '
+                        '${tr('Rent {amount}', {'amount': money(p.rent)})}'
+                        '${p.repairs > 0 ? ' · ${tr('Repairs {amount}', {'amount': money(p.repairs)})}' : ''}',
+                      ),
+                      trailing: Text(
+                        money(p.profit),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: p.profit < 0 ? Colors.red.shade700 : null,
+                        ),
+                      ),
+                    ),
+                ],
+              )
+            : ListTile(
+                leading: const Icon(Icons.lock_outline),
+                title: Text(tr('What each item really earns')),
+                subtitle: Text(tr('Part of Pro')),
+                onTap: () => showProPrompt(context, ProFeature.itemProfit),
+              ),
+      ),
+    ];
+  }
+
   String _label(_Period p) => switch (p) {
     _Period.today => tr('Today'),
     _Period.month => tr('This month'),
@@ -317,6 +357,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                     ),
                   ],
                   ..._staffSection(context),
+                  ..._profitSection(context),
                   if (s.bookings == 0 && s.collected == 0)
                     Padding(
                       padding: const EdgeInsets.only(top: 24),

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants.dart';
+import '../../core/format.dart';
 import '../../core/terms.dart';
 import '../../data/business_profile.dart';
 import '../../data/booking_repo.dart' show BookingException;
@@ -11,10 +12,12 @@ import '../../data/photo_store.dart';
 import '../../data/repositories.dart';
 import '../../l10n/strings.dart';
 import '../../subscription/entitlement.dart';
+import '../../subscription/gates.dart';
 import '../../subscription/plan.dart';
 import '../../subscription/pro_prompt.dart';
 import '../common/widgets.dart';
 import 'item_photo_strip.dart';
+import 'item_repairs_screen.dart';
 
 /// Marks "type my own category" in the category list.
 const _ownCategory = '\u0000own';
@@ -44,13 +47,38 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
   late final _quantity = TextEditingController(
     text: '${widget.item?.quantity ?? 1}',
   );
+  late final _minHours = TextEditingController(
+    text: '${widget.item?.minHours ?? 1}',
+  );
   late final _notes = TextEditingController(text: widget.item?.notes);
   late final _hsn = TextEditingController(text: widget.item?.hsn);
   late double _gst = widget.item?.gstRate ??
       ref.read(profileProvider).valueOrNull?.defaultGstRate ??
       18;
-  late RateType _rateType = widget.item?.rateType ?? RateType.event;
+  late RateType _rateType =
+      widget.item?.rateType ?? ref.read(termsProvider).defaultRateType;
   late ItemStatus _status = widget.item?.status ?? ItemStatus.active;
+
+  /// When an item that is in repair or at cleaning is back in service.
+  late DateTime? _until = widget.item?.statusUntil;
+  late final _buffer = TextEditingController(
+    text: '${widget.item?.bufferHours ?? 0}',
+  );
+  late final _week = TextEditingController(
+    text: widget.item == null || widget.item!.weekRate == 0
+        ? ''
+        : amountText(widget.item!.weekRate),
+  );
+  late final _month = TextEditingController(
+    text: widget.item == null || widget.item!.monthRate == 0
+        ? ''
+        : amountText(widget.item!.monthRate),
+  );
+  late final _lateFee = TextEditingController(
+    text: widget.item == null || widget.item!.lateFee == 0
+        ? ''
+        : amountText(widget.item!.lateFee),
+  );
   List<String> _used = const [];
 
   /// true while the person is typing a category of their own.
@@ -207,6 +235,11 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
       _rate,
       _deposit,
       _quantity,
+      _minHours,
+      _buffer,
+      _week,
+      _month,
+      _lateFee,
       _notes,
       _hsn,
     ]) {
@@ -257,13 +290,141 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
       hsn: _hsn.text,
       gstRate: _gst,
       quantity: service ? 1 : (qty < 1 ? 1 : qty),
+      minHours: !service && _rateType.isHourly
+          ? (int.tryParse(_minHours.text.trim()) ?? 1).clamp(1, 1 << 30)
+          : 1,
       notes: _notes.text,
       status: _status,
+      statusUntil: _status.bookable || _status == ItemStatus.retired
+          ? null
+          : _until,
+      bufferHours: service
+          ? 0
+          : (int.tryParse(_buffer.text.trim()) ?? 0).clamp(0, 24 * 60),
+      weekRate: !service && _rateType == RateType.day
+          ? parseAmount(_week.text)
+          : 0,
+      monthRate: !service && _rateType == RateType.day
+          ? parseAmount(_month.text)
+          : 0,
+      lateFee: service ? 0 : parseAmount(_lateFee.text),
       createdAt: old?.createdAt ?? DateTime.now(),
     );
     final savedId = await ref.read(itemRepoProvider).save(item);
     await _savePictures(savedId);
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// Wraps a field that is part of Pro: without Pro it cannot be typed in,
+  /// and a tap offers Pro.
+  Widget _proField(ProFeature feature, Widget field) {
+    final isPro = ref.watch(isProProvider);
+    if (isPro) return field;
+    return InkWell(
+      onTap: () => showProPrompt(context, feature),
+      child: IgnorePointer(child: Opacity(opacity: 0.6, child: field)),
+    );
+  }
+
+  /// The settings that give a shop more control over an item.
+  List<Widget> _moreControl(Terms terms, bool editing) {
+    final text = Theme.of(context).textTheme;
+    final unit = _rateType.isHourly ? tr('hour') : tr('day');
+    return [
+      const SizedBox(height: 22),
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              tr('More control'),
+              style: text.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+            ),
+          ),
+          if (!ref.watch(isProProvider))
+            Chip(
+              avatar: const Icon(Icons.lock_outline, size: 16),
+              label: Text(tr('Part of Pro')),
+            ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      if (_rateType == RateType.day) ...[
+        Row(
+          children: [
+            Expanded(
+              child: _proField(
+                ProFeature.longRates,
+                TextFormField(
+                  controller: _week,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: tr('Weekly rate (₹)'),
+                    helperText: tr('For 7 days'),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _proField(
+                ProFeature.longRates,
+                TextFormField(
+                  controller: _month,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: tr('Monthly rate (₹)'),
+                    helperText: tr('For 30 days'),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+      ],
+      _proField(
+        ProFeature.lateRule,
+        TextFormField(
+          controller: _lateFee,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: tr('Late fee for each late {unit} (₹)', {'unit': unit}),
+            helperText: tr('Filled in for you when a late return is booked in'),
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _proField(
+        ProFeature.buffer,
+        TextFormField(
+          controller: _buffer,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            labelText: tr('Gap after each return (hours)'),
+            helperText: tr('Kept free for cleaning or servicing'),
+          ),
+        ),
+      ),
+      if (editing && widget.item?.id != null) ...[
+        const SizedBox(height: 8),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.build_circle_outlined),
+          title: Text(tr('Repair and damage log')),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () async {
+            if (!await requirePro(context, ref, ProFeature.repairLog)) return;
+            if (!mounted) return;
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ItemRepairsScreen(item: widget.item!),
+              ),
+            );
+          },
+        ),
+      ],
+    ];
   }
 
   Future<void> _remove() async {
@@ -285,6 +446,11 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
     final editing = widget.item != null;
     final terms = ref.watch(termsProvider);
     final service = terms.service;
+    // the shop's type may load after this page opened: a new vehicle starts
+    // as a day rate, not "per event"
+    if (!editing && !terms.rateTypes.contains(_rateType)) {
+      _rateType = terms.defaultRateType;
+    }
     final options = _options;
     return Scaffold(
       appBar: AppBar(
@@ -381,7 +547,7 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
                     child: TextFormField(
                       controller: _size,
                       decoration: InputDecoration(
-                        labelText: tr('Size (optional)'),
+                        labelText: terms.sizeLabel,
                       ),
                     ),
                   ),
@@ -394,7 +560,7 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: InputDecoration(
                         labelText: tr('Quantity'),
-                        helperText: tr('Pieces you have'),
+                        helperText: terms.quantityHelp,
                       ),
                       validator: (v) => (int.tryParse((v ?? '').trim()) ?? 0) < 1
                           ? tr('At least 1')
@@ -406,12 +572,32 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
               const SizedBox(height: 18),
               SegmentedButton<RateType>(
                 segments: [
-                  for (final r in RateType.values)
+                  // a vehicle is rented by the day or the hour; an item that
+                  // already has another rate keeps showing it
+                  for (final r in terms.rateTypes)
                     ButtonSegment(value: r, label: Text(r.label)),
+                  if (!terms.rateTypes.contains(_rateType))
+                    ButtonSegment(value: _rateType, label: Text(_rateType.label)),
                 ],
                 selected: {_rateType},
                 onSelectionChanged: (s) => setState(() => _rateType = s.first),
               ),
+              if (_rateType.isHourly) ...[
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _minHours,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: tr('Minimum hours'),
+                    helperText: tr(
+                      'Even a shorter use is charged for this many hours',
+                    ),
+                  ),
+                  validator: (v) => (int.tryParse((v ?? '').trim()) ?? 0) < 1
+                      ? tr('At least 1')
+                      : null,
+                ),
+              ],
             ],
             const SizedBox(height: 14),
             Row(
@@ -425,7 +611,7 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
                     decoration: InputDecoration(
                       labelText: service
                           ? tr('Price (₹)')
-                          : tr('Rent for one piece (₹)'),
+                          : terms.rentLabel,
                     ),
                     validator: (v) => parseAmount(v ?? '') <= 0
                         ? tr('Enter the rent')
@@ -441,7 +627,7 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
                         decimal: true,
                       ),
                       decoration: InputDecoration(
-                        labelText: tr('Deposit for one piece (₹)'),
+                        labelText: terms.depositLabel,
                       ),
                     ),
                   ),
@@ -492,9 +678,43 @@ class _ItemFormScreenState extends ConsumerState<ItemFormScreen> {
                   for (final s in ItemStatus.values)
                     DropdownMenuItem(value: s, child: Text(s.label)),
                 ],
-                onChanged: (s) => setState(() => _status = s ?? _status),
+                onChanged: (s) => setState(() {
+                  _status = s ?? _status;
+                  if (_status.bookable || _status == ItemStatus.retired) {
+                    _until = null;
+                  }
+                }),
               ),
+              if (!_status.bookable && _status != ItemStatus.retired)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.event_available_outlined),
+                  title: Text(tr('Back in service on')),
+                  subtitle: Text(
+                    _until == null
+                        ? tr('No date: it stays out until you change the status')
+                        : dateText(_until!),
+                  ),
+                  trailing: _until == null
+                      ? null
+                      : IconButton(
+                          tooltip: tr('Clear'),
+                          icon: const Icon(Icons.close),
+                          onPressed: () => setState(() => _until = null),
+                        ),
+                  onTap: () async {
+                    final today = dayOf(DateTime.now());
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: _until ?? today.add(const Duration(days: 3)),
+                      firstDate: today,
+                      lastDate: today.add(const Duration(days: 365 * 2)),
+                    );
+                    if (d != null) setState(() => _until = dayOf(d));
+                  },
+                ),
             ],
+            if (!service) ..._moreControl(terms, editing),
             const SizedBox(height: 14),
             TextFormField(
               controller: _notes,

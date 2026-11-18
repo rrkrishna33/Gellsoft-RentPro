@@ -42,6 +42,8 @@ class _NoBookings extends BookingRepo {
     required List<int> itemIds,
     required DateTime pickup,
     required DateTime ret,
+    String pickupTime = '',
+    String returnTime = '',
     Map<int, int> quantities = const {},
     int? exceptBookingId,
     DateTime? now,

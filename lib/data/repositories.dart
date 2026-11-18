@@ -65,6 +65,20 @@ class ItemRepo {
       'hsn': item.hsn.trim(),
       'gst_rate': item.gstRate,
       'quantity': item.quantity < 1 ? 1 : item.quantity,
+      'min_hours': item.minHours < 1 ? 1 : item.minHours,
+      'buffer_hours': item.bufferHours < 0 ? 0 : item.bufferHours,
+      'week_rate': item.weekRate < 0 ? 0 : item.weekRate,
+      'month_rate': item.monthRate < 0 ? 0 : item.monthRate,
+      'late_fee': item.lateFee < 0 ? 0 : item.lateFee,
+      'status_until': item.statusUntil == null ||
+              item.status.bookable ||
+              item.status == ItemStatus.retired
+          ? null
+          : DateTime(
+              item.statusUntil!.year,
+              item.statusUntil!.month,
+              item.statusUntil!.day,
+            ).millisecondsSinceEpoch,
       'notes': item.notes.trim(),
       'status': item.status.name,
       'updated_at': now,
@@ -192,6 +206,44 @@ class ItemRepo {
   }
 }
 
+extension ItemRepairs on ItemRepo {
+  /// The repair and damage log of an item, newest first.
+  Future<List<ItemRepair>> repairsOf(int itemId) async {
+    final d = await AppDatabase.instance.db;
+    final rows = await d.query(
+      'item_repairs',
+      where: 'item_id = ?',
+      whereArgs: [itemId],
+      orderBy: 'at DESC, id DESC',
+    );
+    return rows.map(ItemRepair.fromRow).toList();
+  }
+
+  /// Adds an entry to the log. [cost] is what putting it right cost the shop.
+  Future<int> addRepair(
+    int itemId, {
+    required DateTime at,
+    String note = '',
+    double cost = 0,
+    int? bookingId,
+  }) async {
+    final d = await AppDatabase.instance.db;
+    return d.insert('item_repairs', {
+      'item_id': itemId,
+      'booking_id': bookingId,
+      'note': note.trim(),
+      'cost': cost < 0 ? 0 : cost,
+      'at': DateTime(at.year, at.month, at.day).millisecondsSinceEpoch,
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Future<void> removeRepair(int id) async {
+    final d = await AppDatabase.instance.db;
+    await d.delete('item_repairs', where: 'id = ?', whereArgs: [id]);
+  }
+}
+
 class CustomerRepo {
   /// Customers by name. [query] matches the name, phone or address.
   Future<List<Customer>> list({String query = ''}) async {
@@ -256,6 +308,7 @@ class CustomerRepo {
       'state_code': c.stateCode.trim(),
       'id_note': c.idNote.trim(),
       'notes': c.notes.trim(),
+      'warning': c.warning.trim(),
       'updated_at': now,
     };
     final id = c.id;

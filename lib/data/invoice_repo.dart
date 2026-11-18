@@ -62,59 +62,12 @@ class InvoiceRepo {
               0) +
           1;
       final ms = at.millisecondsSinceEpoch;
-      final days = rentalDays(booking.pickupDate, booking.returnDate);
 
-      var cg = 0.0, sg = 0.0, ig = 0.0, taxable = 0.0, total = 0.0;
-      final lines = <Map<String, Object?>>[];
-      for (final l in booking.lines) {
-        final tax = gstEnabled ? l.tax : 0.0;
-        double lc = 0, ls = 0, li = 0;
-        if (inter) {
-          li = tax;
-        } else {
-          lc = r2(tax / 2);
-          ls = r2(tax - lc);
-        }
-        cg += lc;
-        sg += ls;
-        ig += li;
-        taxable += l.taxable;
-        total += l.total;
-        lines.add({
-          'name': l.name,
-          'hsn': l.hsn,
-          'rate_type': l.rateType.name,
-          'rate': l.rate,
-          'days': l.rateType == RateType.day ? days : 1,
-          'qty': l.qty,
-          'gst_rate': gstEnabled ? l.gstRate : 0.0,
-          'taxable': l.taxable,
-          'cgst': lc,
-          'sgst': ls,
-          'igst': li,
-          'total': l.total,
-        });
-      }
-      // late-return and damage charges are lines of their own, without GST
-      for (final c in booking.charges) {
-        taxable += c.amount;
-        total += c.amount;
-        lines.add({
-          'name': chargeLineName(c.kind, c.note),
-          'charge_id': c.id,
-          'hsn': '',
-          'rate_type': RateType.event.name,
-          'rate': c.amount,
-          'days': 1,
-          'qty': 1,
-          'gst_rate': 0.0,
-          'taxable': c.amount,
-          'cgst': 0.0,
-          'sgst': 0.0,
-          'igst': 0.0,
-          'total': c.amount,
-        });
-      }
+      final built = _buildLines(booking, gstEnabled: gstEnabled, inter: inter);
+      final lines = built.lines;
+      final taxable = built.taxable;
+      final cg = built.cgst, sg = built.sgst, ig = built.igst;
+      final total = built.total;
       final id = await txn.insert('invoices', {
         'uuid': newUuid(),
         'updated_at': ms,
@@ -146,6 +99,133 @@ class InvoiceRepo {
         await txn.insert('invoice_items', {'invoice_id': id, ...l});
       }
       return id;
+    });
+  }
+
+  /// The invoice lines for [booking] and what they add up to: each item, then
+  /// each late-return or damage charge. With [inter] the tax is IGST, else it is
+  /// split into CGST and SGST.
+  static ({
+    List<Map<String, Object?>> lines,
+    double taxable,
+    double cgst,
+    double sgst,
+    double igst,
+    double total,
+  })
+  _buildLines(Booking booking, {required bool gstEnabled, required bool inter}) {
+    final days = rentalDays(booking.pickupDate, booking.returnDate);
+    var cg = 0.0, sg = 0.0, ig = 0.0, taxable = 0.0, total = 0.0;
+    final lines = <Map<String, Object?>>[];
+    for (final l in booking.lines) {
+      final tax = gstEnabled ? l.tax : 0.0;
+      double lc = 0, ls = 0, li = 0;
+      if (inter) {
+        li = tax;
+      } else {
+        lc = r2(tax / 2);
+        ls = r2(tax - lc);
+      }
+      cg += lc;
+      sg += ls;
+      ig += li;
+      taxable += l.taxable;
+      total += l.total;
+      lines.add({
+        'name': l.name,
+        'hsn': l.hsn,
+        'rate_type': l.rateType.name,
+        'rate': l.rate,
+        'days': switch (l.rateType) {
+          RateType.day => days,
+          RateType.hour => l.hours,
+          RateType.event => 1,
+        },
+        'qty': l.qty,
+        'gst_rate': gstEnabled ? l.gstRate : 0.0,
+        'taxable': l.taxable,
+        'cgst': lc,
+        'sgst': ls,
+        'igst': li,
+        'total': l.total,
+      });
+    }
+    // late-return and damage charges are lines of their own, without GST
+    for (final c in booking.charges) {
+      taxable += c.amount;
+      total += c.amount;
+      lines.add({
+        'name': chargeLineName(c.kind, c.note),
+        'charge_id': c.id,
+        'hsn': '',
+        'rate_type': RateType.event.name,
+        'rate': c.amount,
+        'days': 1,
+        'qty': 1,
+        'gst_rate': 0.0,
+        'taxable': c.amount,
+        'cgst': 0.0,
+        'sgst': 0.0,
+        'igst': 0.0,
+        'total': c.amount,
+      });
+    }
+    return (
+      lines: lines,
+      taxable: r2(taxable),
+      cgst: r2(cg),
+      sgst: r2(sg),
+      igst: r2(ig),
+      total: r2(total),
+    );
+  }
+
+  /// Brings the booking's current invoice in line with the booking after it was
+  /// changed (a new rent, other items, new dates, a discount), so the invoice,
+  /// the invoice reports and the GST sheets show what the customer really
+  /// owes. The invoice keeps its number and date; its lines and totals are
+  /// worked out again. Does nothing when the booking has no active invoice.
+  Future<void> refreshForBooking(int bookingId, {DateTime? now}) async {
+    final booking = await BookingRepo().get(bookingId);
+    if (booking == null) return;
+    final d = await AppDatabase.instance.db;
+    await d.transaction((txn) async {
+      final rows = await txn.query(
+        'invoices',
+        where: "booking_id = ? AND status = 'active' AND deleted = 0",
+        whereArgs: [bookingId],
+      );
+      if (rows.isEmpty) return;
+      final inv = rows.first;
+      final built = _buildLines(
+        booking,
+        gstEnabled: inv['gst_enabled'] == 1,
+        inter: inv['inter_state'] == 1,
+      );
+      final id = inv['id'] as int;
+      await txn.update(
+        'invoices',
+        {
+          'cust_name': booking.customerName,
+          'cust_phone': booking.customerPhone,
+          'discount': booking.discount,
+          'taxable': built.taxable,
+          'cgst': built.cgst,
+          'sgst': built.sgst,
+          'igst': built.igst,
+          'total': built.total,
+          'event_date': dayOf(booking.eventDate).millisecondsSinceEpoch,
+          'pickup_date': dayOf(booking.pickupDate).millisecondsSinceEpoch,
+          'return_date': dayOf(booking.returnDate).millisecondsSinceEpoch,
+          'updated_at': (now ?? DateTime.now()).millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete('invoice_items', where: 'invoice_id = ?', whereArgs: [id]);
+      for (final l in built.lines) {
+        await txn.insert('invoice_items', {'invoice_id': id, ...l});
+      }
     });
   }
 

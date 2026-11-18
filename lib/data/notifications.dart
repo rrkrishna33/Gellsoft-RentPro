@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../core/booking_math.dart';
 import '../core/format.dart';
 import '../l10n/strings.dart';
 import '../subscription/entitlement.dart';
@@ -232,7 +233,51 @@ List<PlannedNotification> planNotifications({
           );
         }
       }
-      if (!service &&
+      // an hourly booking: a reminder an hour before the items go out and
+      // another 15 minutes before they are due back, at the real times
+      if (!service && b.hasHourly && b.status == BookingStatus.booked) {
+        final start = momentOf(b.pickupDate, b.pickupTime)
+            .subtract(const Duration(minutes: 60));
+        if (start.isAfter(now) &&
+            !dayOf(start).isAfter(today.add(Duration(days: days)))) {
+          out.add(
+            PlannedNotification(
+              idOffset + 100000 + b.id * 20 + 18,
+              start,
+              titled(tr('Items go out at {time}: #{n}', {
+                'time': timeText(b.pickupTime),
+                'n': b.number,
+              })),
+              tr('{items} for {name}', {
+                'items': names,
+                'name': b.customerName,
+              }),
+            ),
+          );
+        }
+      }
+      if (!service && b.hasHourly &&
+          (b.status == BookingStatus.booked || b.status.isOut)) {
+        final end = momentOf(b.returnDate, b.returnTime)
+            .subtract(const Duration(minutes: 15));
+        if (end.isAfter(now) &&
+            !dayOf(end).isAfter(today.add(Duration(days: days)))) {
+          out.add(
+            PlannedNotification(
+              idOffset + 100000 + b.id * 20 + 19,
+              end,
+              titled(tr('Items due back at {time}: #{n}', {
+                'time': timeText(b.returnTime),
+                'n': b.number,
+              })),
+              tr('{items} from {name}', {
+                'items': names,
+                'name': b.customerName,
+              }),
+            ),
+          );
+        }
+      } else if (!service &&
           (b.status == BookingStatus.booked || b.status.isOut)) {
         for (var t = 0; t < times.length; t++) {
           final when = at(b.returnDate, times[t]);

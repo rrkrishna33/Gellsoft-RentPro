@@ -25,6 +25,8 @@ class _BillingSettingsScreenState extends ConsumerState<BillingSettingsScreen> {
   late final TextEditingController _gstin;
   late final TextEditingController _prefix;
   late final TextEditingController _footer;
+  late final TextEditingController _upi;
+  late final TextEditingController _terms;
   late bool _on;
   late bool _incl;
   late String _state;
@@ -39,6 +41,8 @@ class _BillingSettingsScreenState extends ConsumerState<BillingSettingsScreen> {
     _gstin = TextEditingController(text: _p.gstin);
     _prefix = TextEditingController(text: _p.invoicePrefix);
     _footer = TextEditingController(text: _p.invoiceFooter);
+    _upi = TextEditingController(text: _p.upiId);
+    _terms = TextEditingController(text: _p.agreementTerms);
     _on = _p.gstEnabled;
     _incl = _p.taxInclusive;
     _state = indianStates.containsKey(_p.stateCode) ? _p.stateCode : '';
@@ -50,6 +54,8 @@ class _BillingSettingsScreenState extends ConsumerState<BillingSettingsScreen> {
     _gstin.dispose();
     _prefix.dispose();
     _footer.dispose();
+    _upi.dispose();
+    _terms.dispose();
     super.dispose();
   }
 
@@ -66,6 +72,8 @@ class _BillingSettingsScreenState extends ConsumerState<BillingSettingsScreen> {
             defaultGstRate: _rate,
             invoicePrefix: _prefix.text.trim().toUpperCase(),
             invoiceFooter: _footer.text.trim(),
+            upiId: _upi.text.trim(),
+            agreementTerms: _terms.text.trim(),
           ),
         );
     if (mounted) Navigator.of(context).pop();
@@ -185,6 +193,37 @@ class _BillingSettingsScreenState extends ConsumerState<BillingSettingsScreen> {
                 decoration: InputDecoration(
                   labelText: tr('Note at the bottom of an invoice'),
                   helperText: tr('Terms, thanks or your bank details.'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _upi,
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  labelText: tr('Your UPI id (optional)'),
+                  helperText: tr(
+                    'A QR to pay what is still due is printed on invoices and receipts.',
+                  ),
+                ),
+                validator: (v) {
+                  final t = (v ?? '').trim();
+                  if (t.isEmpty) return null;
+                  return RegExp(r'^[\w.\-]{2,}@[A-Za-z]{2,}$').hasMatch(t)
+                      ? null
+                      : tr('Enter a UPI id like name@bank');
+                },
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _terms,
+                maxLines: 6,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  labelText: tr('Terms on the rental agreement (optional)'),
+                  helperText: tr(
+                    'Leave empty to use the standard terms. One term per line.',
+                  ),
                 ),
               ),
               const SizedBox(height: 24),

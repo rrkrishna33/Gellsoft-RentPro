@@ -4,7 +4,9 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../../core/booking_math.dart';
 import '../../core/constants.dart';
+import '../../core/terms.dart';
 import '../../core/format.dart';
 import '../../core/pdf_text.dart';
 import '../../data/booking_models.dart';
@@ -16,6 +18,44 @@ import '../../l10n/strings.dart';
 // The built-in PDF fonts have no rupee glyph, so amounts use "Rs.".
 final _num = NumberFormat('#,##0.00', 'en_IN');
 String _m(double v) => _num.format(v);
+
+/// The pay-by-UPI QR for what is still due, or nothing when the shop has no UPI
+/// id or nothing is owed.
+pw.Widget _upiBlock(
+  PdfTextKit kit,
+  BusinessProfile shop,
+  double due,
+  String note,
+) {
+  final link = due > 0.005 ? shop.upiLink(amount: due, note: note) : null;
+  if (link == null) return pw.SizedBox();
+  return pw.Padding(
+    padding: const pw.EdgeInsets.only(top: 12),
+    child: pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        pw.BarcodeWidget(
+          barcode: pw.Barcode.qrCode(),
+          data: link,
+          width: 80,
+          height: 80,
+        ),
+        pw.SizedBox(width: 12),
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            kit.text(
+              tr('Scan to pay Rs. {amount}', {'amount': _m(due)}),
+              size: 10,
+              bold: true,
+            ),
+            kit.text('UPI: ${shop.upiId.trim()}', size: 8, style: const pw.TextStyle(color: _soft)),
+          ],
+        ),
+      ],
+    ),
+  );
+}
 String _q(double v) =>
     v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
 
@@ -134,10 +174,10 @@ Future<Uint8List> _invoicePdf({
   // columns: item, [SAC/HSN], quantity, [days], rate, [taxable, GST %], amount.
   // A service bill (makeup) has no days, since nothing is taken away.
   final headers = [
-    service ? tr('Service') : tr('Item'),
+    Terms(shop.type).item,
     if (gst) 'SAC/HSN',
     tr('Qty'),
-    if (!service) tr('Days'),
+    if (!service) inv.lines.any((l) => l.rateType.isHourly) ? tr('Days / hours') : tr('Days'),
     tr('Rate'),
     if (gst) ...[tr('Taxable'), 'GST %'],
     tr('Amount'),
@@ -167,7 +207,12 @@ Future<Uint8List> _invoicePdf({
           l.name,
           if (gst) l.hsn.isEmpty ? '-' : l.hsn,
           '${l.qty}',
-          if (!service) l.rateType == RateType.day ? '${l.days}' : '1',
+          if (!service)
+            switch (l.rateType) {
+              RateType.day => '${l.days}',
+              RateType.hour => '${l.days} h',
+              RateType.event => '1',
+            },
           _m(l.rate),
           if (gst) ...[_m(l.taxable), _q(l.gstRate)],
           _m(l.total),
@@ -265,7 +310,8 @@ Future<Uint8List> _invoicePdf({
                 ] else ...[
                   kit.text(tr('Rental dates'), size: 8, style: const pw.TextStyle(color: _soft)),
                   kit.text('${tr('Pickup')}: ${dateText(inv.pickupDate)}', size: 9),
-                  kit.text('${tr('Event')}: ${dateText(inv.eventDate)}', size: 9),
+                  if (shop.type != ShopType.vehicle)
+                    kit.text('${tr('Event')}: ${dateText(inv.eventDate)}', size: 9),
                   kit.text('${tr('Return')}: ${dateText(inv.returnDate)}', size: 9),
                 ],
               ],
@@ -368,6 +414,7 @@ Future<Uint8List> _invoicePdf({
             ),
           ),
         ],
+        if (!inv.cancelled) _upiBlock(kit, shop, inv.due, inv.label),
         if (shop.invoiceFooter.trim().isNotEmpty) ...[
           pw.SizedBox(height: 14),
           kit.text(shop.invoiceFooter, size: 9, style: const pw.TextStyle(color: _soft)),
@@ -446,10 +493,157 @@ Future<Uint8List> _receiptPdf(
           _kv(kit, tr('Balance due'), 'Rs. ${_m(booking.balanceDue)}', bold: true),
           if (booking.depositTotal > 0)
             _kv(kit, tr('Deposit held'), 'Rs. ${_m(booking.depositHeld)}'),
+          if (booking.status != BookingStatus.cancelled)
+            _upiBlock(kit, shop, booking.balanceDue, '#${booking.number}'),
           pw.Spacer(),
           kit.text(tr('Thank you!'), size: 10, bold: true, style: const pw.TextStyle(color: _accent)),
         ],
       ),
+    ),
+  );
+  return doc.save();
+}
+
+/// The terms on an agreement: the shop's own (one per line) or the standard
+/// ones. A vehicle shop adds the licence and fines terms.
+List<String> agreementTermsFor(BusinessProfile shop) {
+  final own = [
+    for (final l in shop.agreementTerms.split('\n'))
+      if (l.trim().isNotEmpty) l.trim(),
+  ];
+  if (own.isNotEmpty) return own;
+  return [
+    tr('The items must be returned clean and in the same condition, on or before the return date and time.'),
+    tr('A late return is charged extra, as agreed with the shop.'),
+    tr('Loss or damage is charged to the customer and may be taken from the deposit.'),
+    tr('The deposit is returned when the items are back, after any deductions.'),
+    tr('The customer will not lend or sublet the items to anyone else.'),
+    tr('Rent paid is not refunded once the items have gone out.'),
+    if (shop.type == ShopType.vehicle) ...[
+      tr('The rider or driver must hold a valid licence. Fines and challans during the rental are paid by the customer.'),
+      tr('The vehicle must not be used for racing, towing or any unlawful purpose.'),
+    ],
+  ];
+}
+
+/// A rental agreement for a booking: both parties, the items and dates, the
+/// money, the terms and a line for each signature.
+Future<Uint8List> buildAgreementPdf({
+  required BusinessProfile shop,
+  required Booking booking,
+  Customer? customer,
+  bool showLogo = true,
+}) async {
+  final logo = showLogo ? await shop.logoBytes() : null;
+  Future<Uint8List> build(Uint8List? picture) =>
+      _agreementPdf(shop, booking, customer, picture);
+  if (logo == null) return build(null);
+  try {
+    return await build(logo);
+  } catch (_) {
+    return build(null);
+  }
+}
+
+Future<Uint8List> _agreementPdf(
+  BusinessProfile shop,
+  Booking b,
+  Customer? customer,
+  Uint8List? logo,
+) async {
+  final kit = await PdfTextKit.load();
+  final doc = pw.Document(
+    theme: kit.theme,
+    title: 'Agreement #${b.number}',
+    author: shop.name,
+  );
+  final terms = Terms(shop.type);
+  String when(DateTime d, String time) =>
+      b.hasHourly && time.isNotEmpty ? '${dateText(d)} ${timeText(time)}' : dateText(d);
+  final terms2 = agreementTermsFor(shop);
+  pw.Widget signature(String who) => pw.Expanded(
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.SizedBox(height: 40),
+        pw.Container(height: 0.6, color: _soft),
+        pw.SizedBox(height: 3),
+        kit.text(who, size: 9, style: const pw.TextStyle(color: _soft)),
+      ],
+    ),
+  );
+  doc.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(32),
+      build: (ctx) => [
+        ..._shopBlock(kit, shop, false, logo: logo),
+        pw.SizedBox(height: 10),
+        pw.Divider(color: _line),
+        kit.text(tr('RENTAL AGREEMENT'), size: 16, bold: true, style: const pw.TextStyle(color: _accent)),
+        pw.SizedBox(height: 8),
+        _kv(kit, tr('Booking'), '#${b.number}'),
+        _kv(kit, tr('Date'), dateText(b.createdAt)),
+        pw.SizedBox(height: 8),
+        kit.text(tr('Customer'), size: 9, bold: true, style: const pw.TextStyle(color: _soft)),
+        kit.text(b.customerName, size: 11, bold: true),
+        if (b.customerPhone.isNotEmpty)
+          kit.text('${tr('Phone')}: ${b.customerPhone}', size: 9),
+        if (customer != null && customer.address.trim().isNotEmpty)
+          kit.text(customer.address.trim(), size: 9),
+        if (customer != null && customer.idNote.trim().isNotEmpty)
+          kit.text('${tr('ID')}: ${customer.idNote.trim()}', size: 9),
+        pw.SizedBox(height: 10),
+        kit.text(terms.items, size: 9, bold: true, style: const pw.TextStyle(color: _soft)),
+        for (final l in b.lines)
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                kit.text(l.label, size: 10),
+                kit.text(
+                  '${l.rateType.label}: Rs. ${_m(l.rate)}'
+                  '${l.rateType.isHourly ? '  (${hoursText(l.hours)})' : ''}',
+                  size: 9,
+                  style: const pw.TextStyle(color: _soft),
+                ),
+              ],
+            ),
+          ),
+        pw.SizedBox(height: 10),
+        _kv(kit, tr('Pickup'), when(b.pickupDate, b.pickupTime)),
+        if (terms.hasEvent) _kv(kit, tr('Event'), dateText(b.eventDate)),
+        _kv(kit, tr('Return'), when(b.returnDate, b.returnTime)),
+        pw.SizedBox(height: 6),
+        pw.Divider(color: _line),
+        _kv(kit, tr('Rent'), 'Rs. ${_m(b.payable)}', bold: true),
+        if (b.depositTotal > 0)
+          _kv(kit, tr('Refundable deposit'), 'Rs. ${_m(b.depositTotal)}'),
+        _kv(kit, tr('Paid'), 'Rs. ${_m(b.rentPaid)}'),
+        _kv(kit, tr('Balance due'), 'Rs. ${_m(b.balanceDue)}', bold: true),
+        pw.SizedBox(height: 14),
+        kit.text(tr('Terms'), size: 11, bold: true, style: const pw.TextStyle(color: _accent)),
+        pw.SizedBox(height: 4),
+        for (final (i, t) in terms2.indexed)
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(vertical: 2),
+            child: kit.text('${i + 1}. $t', size: 9),
+          ),
+        pw.SizedBox(height: 18),
+        kit.text(
+          tr('I have read and agree to these terms.'),
+          size: 9,
+          style: const pw.TextStyle(color: _soft),
+        ),
+        pw.Row(
+          children: [
+            signature(tr('Customer signature')),
+            pw.SizedBox(width: 30),
+            signature(tr('For {shop}', {'shop': shop.name})),
+          ],
+        ),
+      ],
     ),
   );
   return doc.save();

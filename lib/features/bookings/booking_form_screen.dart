@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../data/booking_models.dart';
 import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
+import '../../data/invoice_repo.dart';
 import '../../data/models.dart';
 import '../../data/repositories.dart';
 import '../../data/staff.dart';
@@ -32,6 +33,10 @@ class BookingFormScreen extends ConsumerStatefulWidget {
   ConsumerState<BookingFormScreen> createState() => _BookingFormScreenState();
 }
 
+/// A date, with the time after it when there is one: "05 Mar 2027, 02:30 PM".
+String _momentText(DateTime day, String time) =>
+    time.isEmpty ? dateText(day) : '${dateText(day)} ${timeText(time)}';
+
 class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
   Customer? _customer;
   late DateTime _event;
@@ -43,8 +48,24 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
   /// How many of each chosen item (item id -> pieces).
   final _qty = <int, int>{};
 
+  /// The rent and deposit of one piece agreed for THIS booking, where it is
+  /// not the item's own (item id -> amount).
+  final _rateOv = <int, double>{};
+  final _depOv = <int, double>{};
+
   /// The appointment time ("14:30") of a service booking, or ''.
   late String _time = widget.booking?.eventTime ?? '';
+
+  /// The day of a trial or fitting before the event (costume shops), or null.
+  late DateTime? _trial = widget.booking?.trialDate;
+
+  /// When the items go out and come back, used when an item is charged by the
+  /// hour.
+  late String _pickupTime = _orElse(widget.booking?.pickupTime, '10:00');
+  late String _returnTime = _orElse(widget.booking?.returnTime, '12:00');
+
+  static String _orElse(String? v, String fallback) =>
+      v == null || v.isEmpty ? fallback : v;
   late final _discount = TextEditingController(
     text: widget.booking == null || widget.booking!.discount == 0
         ? ''
@@ -61,12 +82,33 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
 
   bool get _editing => widget.booking != null;
 
+  /// A bike, car or other vehicle shop: pickup and return only, no event day.
+  bool get _vehicle => !_service && !ref.read(termsProvider).hasEvent;
+
+  double _rateOf(RentItem i) => _rateOv[i.id] ?? i.rate;
+  double _depositOf(RentItem i) => _depOv[i.id] ?? i.deposit;
+
   /// A service business (makeup artist): one appointment, nothing to pick up
   /// or return, and no limit on how many bookings share a day.
   bool get _service =>
       ref.read(profileProvider).valueOrNull?.type.isService ?? false;
 
   int _qtyOf(RentItem i) => _qty[i.id] ?? 1;
+
+  /// Some chosen item is rented by the hour, so the times matter.
+  bool get _hasHourly => _chosen.values.any((i) => i.rateType.isHourly);
+
+  /// Hours an hourly item is charged for on the dates and times shown.
+  int get _hours => rentalHours(_pickup, _pickupTime, _return, _returnTime);
+
+  /// An hourly rental is usually one day: pickup and return on the event day,
+  /// until the person picks other dates.
+  void _hourlyDates() {
+    if (_hasHourly && !_datesTouched && !_editing) {
+      _pickup = _event;
+      _return = _event;
+    }
+  }
 
   @override
   void initState() {
@@ -80,6 +122,11 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
       _event = b?.eventDate ?? today.add(const Duration(days: 1));
       _pickup = _event;
       _return = _event;
+    } else if (_vehicle) {
+      // picked up today and back tomorrow; the event is the pickup day
+      _pickup = b?.pickupDate ?? today;
+      _return = b?.returnDate ?? today.add(const Duration(days: 1));
+      _event = _pickup;
     }
     _remind =
         b?.remindDays ?? ref.read(profileProvider).valueOrNull?.remindDays ?? 2;
@@ -94,6 +141,9 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
       final c = await customers.get(b.customerId);
       for (final l in b.lines) {
         _qty[l.itemId] = l.qty;
+        // what was agreed stays, even if the item's own rate changed since
+        _rateOv[l.itemId] = l.rate;
+        _depOv[l.itemId] = l.deposit;
         // a removed item keeps its place so the page still shows it
         _chosen[l.itemId] =
             await items.get(l.itemId) ??
@@ -137,6 +187,8 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
           itemIds: _chosen.keys.toList(),
           pickup: _pickup,
           ret: _return,
+          pickupTime: _pickupTime,
+          returnTime: _returnTime,
           quantities: {for (final i in _chosen.values) i.id!: _qtyOf(i)},
           exceptBookingId: widget.booking?.id,
         );
@@ -145,7 +197,29 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
 
   /// What one chosen item comes to for the dates shown and its quantity.
   double _lineAmount(RentItem i) =>
-      r2(lineAmount(i.rateType, i.rate, _pickup, _return) * _qtyOf(i));
+      r2(
+        lineAmount(
+              i.rateType,
+              _rateOf(i),
+              _pickup,
+              _return,
+              hours: _hoursFor(i),
+              // weekly and monthly rates apply to the usual daily rent only
+              weekRate: _rateOf(i) == i.rate ? i.weekRate : 0,
+              monthRate: _rateOf(i) == i.rate ? i.monthRate : 0,
+            ) *
+            _qtyOf(i),
+      );
+
+  /// Hours an hourly item is charged for: the booking's hours, or the item's
+  /// own minimum when that is more.
+  int _hoursFor(RentItem i) => i.minHours > _hours ? i.minHours : _hours;
+
+  /// The chosen hourly items whose minimum is more than the hours booked.
+  List<RentItem> get _atMinimum => [
+    for (final i in _chosen.values)
+      if (i.rateType.isHourly && i.minHours > _hours) i,
+  ];
 
   GstConfig get _gst =>
       ref.read(profileProvider).valueOrNull?.gst ?? GstConfig.off;
@@ -166,7 +240,7 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
   double get _tax => r2(_lines.fold(0.0, (a, l) => a + l.tax));
   double get _payable => r2(_lines.fold(0.0, (a, l) => a + l.total));
   double get _deposit =>
-      _chosen.values.fold(0.0, (a, i) => a + i.deposit * _qtyOf(i));
+      _chosen.values.fold(0.0, (a, i) => a + _depositOf(i) * _qtyOf(i));
   double get _disc => parseAmount(_discount.text);
   double get _adv => parseAmount(_advance.text);
 
@@ -198,6 +272,36 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
     });
   }
 
+  /// Asks for a time of day; returns "14:30", or null when cancelled.
+  Future<String?> _askClock(String current) async {
+    final parts = current.split(':');
+    final at = await showTimePicker(
+      context: context,
+      initialTime: parts.length == 2
+          ? TimeOfDay(
+              hour: int.tryParse(parts[0]) ?? 10,
+              minute: int.tryParse(parts[1]) ?? 0,
+            )
+          : const TimeOfDay(hour: 10, minute: 0),
+    );
+    if (at == null) return null;
+    return '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _pickPickupTime() async {
+    final t = await _askClock(_pickupTime);
+    if (t == null) return;
+    setState(() => _pickupTime = t);
+    _recheck();
+  }
+
+  Future<void> _pickReturnTime() async {
+    final t = await _askClock(_returnTime);
+    if (t == null) return;
+    setState(() => _returnTime = t);
+    _recheck();
+  }
+
   Future<void> _pickEvent() async {
     final d = await _askDate(_event);
     if (d == null) return;
@@ -207,8 +311,13 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
         _pickup = _event;
         _return = _event;
       } else if (!_datesTouched) {
-        _pickup = _event.subtract(const Duration(days: 1));
-        _return = _event.add(const Duration(days: 1));
+        if (_hasHourly) {
+          _pickup = _event;
+          _return = _event;
+        } else {
+          _pickup = _event.subtract(const Duration(days: 1));
+          _return = _event.add(const Duration(days: 1));
+        }
       }
     });
     _recheck();
@@ -220,6 +329,10 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
     setState(() {
       _pickup = dayOf(d);
       _datesTouched = true;
+      if (_vehicle) {
+        _event = _pickup;
+        if (_return.isBefore(_pickup)) _return = _pickup;
+      }
     });
     _recheck();
   }
@@ -253,6 +366,8 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
         chosen: _chosen.keys.toSet(),
         pickup: _pickup,
         ret: _return,
+        pickupTime: _pickupTime,
+        returnTime: _returnTime,
         service: _service,
         exceptBookingId: widget.booking?.id,
       ),
@@ -263,8 +378,41 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
         ..clear()
         ..addEntries(picked.map((i) => MapEntry(i.id!, i)));
       _qty.removeWhere((id, _) => !_chosen.containsKey(id));
+      _hourlyDates();
     });
     _recheck();
+  }
+
+  /// Lets the shop agree a different rent or deposit for this booking only
+  /// (bargaining is normal). The totals, invoice and reports follow it.
+  Future<void> _editRent(RentItem i) async {
+    final result = await showDialog<({double rate, double deposit})?>(
+      context: context,
+      builder: (_) => _RentDialog(
+        item: i,
+        rate: _rateOf(i),
+        deposit: _depositOf(i),
+        qty: _qtyOf(i),
+        amountFor: (rate) => r2(
+          lineAmount(
+                i.rateType,
+                rate,
+                _pickup,
+                _return,
+                hours: _hoursFor(i),
+                weekRate: rate == i.rate ? i.weekRate : 0,
+                monthRate: rate == i.rate ? i.monthRate : 0,
+              ) *
+              _qtyOf(i),
+        ),
+        service: _service,
+      ),
+    );
+    if (result == null) return;
+    setState(() {
+      _rateOv[i.id!] = result.rate;
+      _depOv[i.id!] = result.deposit;
+    });
   }
 
   /// Shows why the booking was not saved: on the page, and in a message at
@@ -287,6 +435,12 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
       // one appointment: nothing is picked up or returned on other days
       _pickup = _event;
       _return = _event;
+    } else if (_vehicle) {
+      _event = _pickup;
+      if (_return.isBefore(_pickup)) {
+        _fail(tr('The return date cannot be before the pickup date.'));
+        return;
+      }
     }
     if (_customer == null) {
       _fail(tr('Choose the customer.'));
@@ -307,10 +461,15 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
       returnDate: _return,
       itemIds: _chosen.keys.toList(),
       quantities: {for (final i in _chosen.values) i.id!: _qtyOf(i)},
+      rates: {for (final i in _chosen.values) i.id!: _rateOf(i)},
+      deposits: {for (final i in _chosen.values) i.id!: _depositOf(i)},
       discount: _disc,
       notes: _notes.text,
       remindDays: _remind,
       eventTime: _service ? _time : '',
+      pickupTime: _pickupTime,
+      returnTime: _returnTime,
+      trialDate: ref.read(termsProvider).hasTrial ? _trial : null,
       createdBy: ref.read(permsProvider).name,
     );
     final repo = ref.read(bookingRepoProvider);
@@ -324,6 +483,10 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
           gst: _gst,
           checkAvailability: !_service,
         );
+        // the invoice already made for it follows the changes
+        await ref.read(invoiceRepoProvider).refreshForBooking(id);
+        ref.invalidate(bookingInvoiceProvider(id));
+        ref.invalidate(invoicesProvider);
       } else {
         id = await repo.create(
           draft,
@@ -375,6 +538,16 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
       ),
     );
 
+    Widget timeRow(String label, String v, VoidCallback onTap) => ListTile(
+      leading: const Icon(Icons.schedule),
+      title: Text(label),
+      trailing: Text(
+        timeText(v),
+        style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+      ),
+      onTap: onTap,
+    );
+
     Widget dateRow(String label, DateTime v, VoidCallback onTap) => ListTile(
       leading: const Icon(Icons.calendar_today_outlined),
       title: Text(label),
@@ -421,6 +594,28 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
                   ),
                 ),
               ),
+            if (_customer != null && _customer!.warning.trim().isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Palette.warning.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, color: Palette.warning),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _customer!.warning.trim(),
+                        style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             section(tr('Customer'), [
               ListTile(
                 leading: const Icon(Icons.person_outline),
@@ -433,7 +628,44 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
               ),
             ]),
             section(_service ? tr('Appointment') : tr('Dates'), [
-              dateRow(terms.eventDate, _event, _pickEvent),
+              if (terms.hasEvent) dateRow(terms.eventDate, _event, _pickEvent),
+              if (terms.hasTrial) ...[
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.checkroom_outlined),
+                  title: Text(tr('Trial or fitting date')),
+                  subtitle: _trial == null ? Text(tr('Not set')) : null,
+                  trailing: _trial == null
+                      ? null
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              dateText(_trial!),
+                              style: text.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: tr('Clear'),
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () => setState(() => _trial = null),
+                            ),
+                          ],
+                        ),
+                  onTap: () async {
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: _trial ?? dayOf(DateTime.now()),
+                      firstDate: dayOf(DateTime.now()).subtract(
+                        const Duration(days: 30),
+                      ),
+                      lastDate: _event,
+                    );
+                    if (d != null) setState(() => _trial = dayOf(d));
+                  },
+                ),
+              ],
               if (_service) ...[
                 const Divider(),
                 ListTile(
@@ -461,10 +693,46 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
                   onTap: _pickTime,
                 ),
               ] else ...[
-                const Divider(),
+                if (terms.hasEvent) const Divider(),
                 dateRow(tr('Pickup date'), _pickup, _pickPickup),
+                if (_hasHourly) timeRow(tr('Pickup time'), _pickupTime, _pickPickupTime),
                 const Divider(),
                 dateRow(tr('Return date'), _return, _pickReturn),
+                if (_hasHourly) timeRow(tr('Return time'), _returnTime, _pickReturnTime),
+                if (_hasHourly) ...[
+                  const Divider(),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                    child: Text(
+                      validHourlySpan(_pickup, _pickupTime, _return, _returnTime)
+                          ? tr('Charged for {time} (each started hour counts).', {
+                              'time': hoursText(_hours),
+                            })
+                          : tr('The return time must be after the pickup time.'),
+                      style: text.bodySmall?.copyWith(
+                        color: validHourlySpan(
+                              _pickup,
+                              _pickupTime,
+                              _return,
+                              _returnTime,
+                            )
+                            ? scheme.outline
+                            : Palette.danger,
+                      ),
+                    ),
+                  ),
+                  for (final i in _atMinimum)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                      child: Text(
+                        tr('{item}: minimum {n} hours, charged for {n} hours.', {
+                          'item': i.name,
+                          'n': i.minHours,
+                        }),
+                        style: text.bodySmall?.copyWith(color: scheme.outline),
+                      ),
+                    ),
+                ],
               ],
             ]),
             section(terms.items, [
@@ -472,9 +740,11 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
                 ListTile(
                   title: Text(i.name),
                   subtitle: Text(
-                    '${i.rateType.label} · ${money(i.rate)}'
-                    '${i.deposit > 0 ? ' · ${tr('Deposit')} ${money(i.deposit)}' : ''}',
+                    '${i.rateType.label} · ${money(_rateOf(i))}'
+                    '${_depositOf(i) > 0 ? ' · ${tr('Deposit')} ${money(_depositOf(i))}' : ''}'
+                    '${_rateOf(i) != i.rate || _depositOf(i) != i.deposit ? ' · ${tr('changed')}' : ''}',
                   ),
+                  onTap: () => _editRent(i),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -488,12 +758,19 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
                         },
                       ),
                       IconButton(
+                        tooltip: tr('Change the rent'),
+                        icon: const Icon(Icons.edit_outlined),
+                        onPressed: () => _editRent(i),
+                      ),
+                      IconButton(
                         tooltip: tr('Remove'),
                         icon: const Icon(Icons.close),
                         onPressed: () {
                           setState(() {
                             _chosen.remove(i.id);
                             _qty.remove(i.id);
+                            _rateOv.remove(i.id);
+                            _depOv.remove(i.id);
                           });
                           _recheck();
                         },
@@ -539,8 +816,8 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
                                   'item': _chosen[c.itemId]?.name ?? '',
                                   'name': c.customerName,
                                   'n': c.bookingNumber,
-                                  'from': dateText(c.pickupDate),
-                                  'to': dateText(c.returnDate),
+                                  'from': _momentText(c.pickupDate, c.pickupTime),
+                                  'to': _momentText(c.returnDate, c.returnTime),
                                 },
                               ),
                         style: text.bodyMedium?.copyWith(color: Palette.danger),
@@ -639,9 +916,7 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
               ListTile(
                 leading: const Icon(Icons.notifications_outlined),
                 title: Text(
-                  _service
-                      ? tr('Remind me before the appointment')
-                      : tr('Remind me before the event'),
+                  terms.remindLabel,
                 ),
                 trailing: DropdownButton<int>(
                   value: _remind,
@@ -799,12 +1074,16 @@ class _ItemPicker extends ConsumerStatefulWidget {
     required this.chosen,
     required this.pickup,
     required this.ret,
+    required this.pickupTime,
+    required this.returnTime,
     required this.service,
     this.exceptBookingId,
   });
   final Set<int> chosen;
   final DateTime pickup;
   final DateTime ret;
+  final String pickupTime;
+  final String returnTime;
   final bool service;
   final int? exceptBookingId;
 
@@ -827,7 +1106,7 @@ class _ItemPickerState extends ConsumerState<_ItemPicker> {
 
   Future<void> _load() async {
     final items = (await ref.read(itemRepoProvider).list())
-        .where((i) => i.status.bookable)
+        .where((i) => i.bookableOn(widget.pickup))
         .toList();
     final avail = widget.service
         ? const <int, ItemAvailability>{}
@@ -837,6 +1116,8 @@ class _ItemPickerState extends ConsumerState<_ItemPicker> {
                 itemIds: [for (final i in items) i.id!],
                 pickup: widget.pickup,
                 ret: widget.ret,
+                pickupTime: widget.pickupTime,
+                returnTime: widget.returnTime,
                 exceptBookingId: widget.exceptBookingId,
               );
     final covers = await ref.read(itemRepoProvider).covers();
@@ -980,6 +1261,103 @@ class _QtyStepper extends StatelessWidget {
           Icons.add_circle_outline,
           value < max ? () => onChanged(value + 1) : null,
           tr('More'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Change the rent and deposit of one item for this booking. Shows what the
+/// line comes to as the rent is typed.
+class _RentDialog extends StatefulWidget {
+  const _RentDialog({
+    required this.item,
+    required this.rate,
+    required this.deposit,
+    required this.qty,
+    required this.amountFor,
+    required this.service,
+  });
+  final RentItem item;
+  final double rate;
+  final double deposit;
+  final int qty;
+  final double Function(double rate) amountFor;
+  final bool service;
+
+  @override
+  State<_RentDialog> createState() => _RentDialogState();
+}
+
+class _RentDialogState extends State<_RentDialog> {
+  late final _rate = TextEditingController(text: amountText(widget.rate));
+  late final _deposit = TextEditingController(text: amountText(widget.deposit));
+
+  @override
+  void dispose() {
+    _rate.dispose();
+    _deposit.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final i = widget.item;
+    final rate = parseAmount(_rate.text);
+    return AlertDialog(
+      title: Text(i.name),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _rate,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                labelText: '${tr('Rent')} (${i.rateType.label}) ₹',
+                helperText: '${tr('Usual rate')}: ${money(i.rate)}',
+              ),
+            ),
+            if (!widget.service) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _deposit,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: '${tr('Deposit')} ₹',
+                  helperText: '${tr('Usual deposit')}: ${money(i.deposit)}',
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
+            Text(
+              tr('This line comes to {amount}', {
+                'amount': money(widget.amountFor(rate)),
+              }),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              tr('Only for this booking. The bill, reports and invoice use this rent.'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, (rate: i.rate, deposit: i.deposit)),
+          child: Text(tr('Use the usual rate')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, (
+            rate: rate,
+            deposit: widget.service ? 0.0 : parseAmount(_deposit.text),
+          )),
+          child: Text(tr('Done')),
         ),
       ],
     );

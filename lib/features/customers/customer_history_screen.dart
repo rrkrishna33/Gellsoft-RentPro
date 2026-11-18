@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
+import '../../core/terms.dart';
 import '../../core/theme.dart';
 import '../../data/booking_models.dart';
 import '../../data/booking_repo.dart';
@@ -123,6 +124,7 @@ class CustomerHistoryScreen extends ConsumerWidget {
                     BookingTile(
                       booking: b,
                       service: service,
+                      vehicle: ref.watch(termsProvider).vehicle,
                       onTap: () async {
                         await Navigator.of(context).push(
                           MaterialPageRoute<void>(

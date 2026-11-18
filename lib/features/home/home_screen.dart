@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/constants.dart';
+import '../../core/terms.dart';
 import '../../core/format.dart';
 import '../../core/pressable.dart';
 import '../../core/theme.dart';
@@ -103,7 +105,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       const ItemsScreen(),
       const CustomersScreen(),
     ];
-    final service = widget.profile.type.isService;
     // The back button on Bookings, Items or Customers goes to Home first;
     // pressed again on Home it closes the app.
     return PopScope(
@@ -155,7 +156,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   if (i == 0) _refresh();
                 },
                 onNew: _newBooking,
-                itemsLabel: service ? tr('Services') : tr('Items'),
+                itemsLabel: Terms(widget.profile.type).items,
               ),
             ),
           ],
@@ -281,7 +282,7 @@ class _HomeTab extends ConsumerWidget {
     final tiles = <_Tile>[
       _Tile(tr('Bookings'), Icons.event_available_outlined, () => onTab(1)),
       _Tile(
-        profile.type.isService ? tr('Services') : tr('Items'),
+        Terms(profile.type).items,
         Icons.checkroom_outlined,
         () => onTab(2),
       ),
@@ -334,7 +335,11 @@ class _HomeTab extends ConsumerWidget {
             const _Dashboard(),
             if (reminders.isNotEmpty) ...[
               const SizedBox(height: 14),
-              _AttentionCard(items: reminders, service: profile.type.isService),
+              _AttentionCard(
+                items: reminders,
+                service: profile.type.isService,
+                vehicle: profile.type == ShopType.vehicle,
+              ),
             ],
             const SizedBox(height: 20),
             Text(
@@ -650,9 +655,14 @@ class _Glow extends StatelessWidget {
 
 /// The most urgent things from the reminders, and a way into the full list.
 class _AttentionCard extends StatelessWidget {
-  const _AttentionCard({required this.items, required this.service});
+  const _AttentionCard({
+    required this.items,
+    required this.service,
+    this.vehicle = false,
+  });
   final List<ReminderItem> items;
   final bool service;
+  final bool vehicle;
 
   @override
   Widget build(BuildContext context) {
@@ -704,7 +714,7 @@ class _AttentionCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        '${reminderTitle(i.kind, service: service)}: #${i.booking.number} ${i.booking.customerName}',
+                        '${reminderTitle(i.kind, service: service, vehicle: vehicle)}: #${i.booking.number} ${i.booking.customerName}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium,

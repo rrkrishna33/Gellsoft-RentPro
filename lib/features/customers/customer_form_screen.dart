@@ -3,11 +3,45 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants.dart';
 import '../../core/gst.dart';
+import '../../data/booking_models.dart';
+import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
 import '../../data/models.dart';
 import '../../data/repositories.dart';
 import '../../l10n/strings.dart';
 import '../common/widgets.dart';
+
+/// Asks, then removes [c] from the customer list. When some of their bookings
+/// are still open or have money due, the question says so: those bookings stay
+/// and keep working. Returns true when the customer was removed.
+Future<bool> removeCustomerFlow(
+  BuildContext context,
+  WidgetRef ref,
+  Customer c,
+) async {
+  final bookings = await ref.read(bookingRepoProvider).forCustomer(c.id!);
+  final open = bookings
+      .where(
+        (b) =>
+            b.status != BookingStatus.cancelled &&
+            (b.status != BookingStatus.returned || b.balanceDue > 0),
+      )
+      .length;
+  if (!context.mounted) return false;
+  final ok = await confirmRemove(
+    context,
+    title: tr('Remove this customer?'),
+    message: open == 0
+        ? tr('Their old bookings stay. They will leave the customer list.')
+        : tr(
+            '{n} of their bookings are still open or have money due. They stay and keep working, but this customer will leave the customer list.',
+            {'n': open},
+          ),
+  );
+  if (!ok) return false;
+  await ref.read(customerRepoProvider).delete(c.id!);
+  return true;
+}
 
 /// Add a new customer, or change or remove an existing one.
 class CustomerFormScreen extends ConsumerStatefulWidget {
@@ -29,11 +63,12 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
   late String _state = widget.customer?.stateCode ?? '';
   late final _idNote = TextEditingController(text: widget.customer?.idNote);
   late final _notes = TextEditingController(text: widget.customer?.notes);
+  late final _warning = TextEditingController(text: widget.customer?.warning);
   bool _saving = false;
 
   @override
   void dispose() {
-    for (final c in [_name, _phone, _address, _gstin, _idNote, _notes]) {
+    for (final c in [_name, _phone, _address, _gstin, _idNote, _notes, _warning]) {
       c.dispose();
     }
     super.dispose();
@@ -85,6 +120,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
         stateCode: _state,
         idNote: _idNote.text,
         notes: _notes.text,
+        warning: _warning.text,
         createdAt: old?.createdAt ?? DateTime.now(),
       ),
     );
@@ -92,14 +128,8 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
   }
 
   Future<void> _remove() async {
-    final ok = await confirmRemove(
-      context,
-      title: tr('Remove this customer?'),
-      message: tr('Their old bookings stay. They will leave the customer list.'),
-    );
-    if (!ok || !mounted) return;
-    await ref.read(customerRepoProvider).delete(widget.customer!.id!);
-    if (mounted) Navigator.of(context).pop();
+    final removed = await removeCustomerFlow(context, ref, widget.customer!);
+    if (removed && mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -198,6 +228,17 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
               decoration: InputDecoration(
                 labelText: tr('Notes (optional)'),
                 helperText: tr('Preferences, measurements, anything to remember'),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _warning,
+              maxLines: 2,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                labelText: tr('Warning for staff (optional)'),
+                helperText: tr('Shown when this customer is booked, for example "returned late twice"'),
+                prefixIcon: const Icon(Icons.warning_amber_rounded),
               ),
             ),
             const SizedBox(height: 24),

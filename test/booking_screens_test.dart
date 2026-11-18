@@ -342,11 +342,17 @@ void main() {
       'stain',
     );
     await t.tap(find.widgetWithText(FilledButton, 'Save'));
+    // settling the deposit and returning is several saves in a row
+    await settle(t);
     await settle(t);
     b = (await reload(t, id));
     expect(b.status, BookingStatus.returned);
     expect(b.depositRefunded, 2500);
-    expect(b.depositHeld, 500);
+    // the 500 kept is charged for the stain and taken from the deposit
+    expect(b.depositKept, 500);
+    expect(b.depositHeld, 0);
+    expect(b.charges.single.amount, 500);
+    expect(b.charges.single.note, 'stain');
     expect(find.text('Mark as returned'), findsNothing);
   });
 

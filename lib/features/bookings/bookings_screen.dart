@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
+import '../../core/terms.dart';
 import '../../core/theme.dart';
 import '../../data/booking_models.dart';
 import '../../data/booking_repo.dart';
@@ -130,6 +131,7 @@ class BookingsScreen extends ConsumerWidget {
                 itemBuilder: (_, i) => BookingTile(
                   booking: list[i],
                   service: service,
+                  vehicle: ref.watch(termsProvider).vehicle,
                   onTap: () async {
                     await Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -162,10 +164,14 @@ class BookingTile extends StatelessWidget {
     required this.booking,
     required this.onTap,
     this.service = false,
+    this.vehicle = false,
   });
   final Booking booking;
   final VoidCallback onTap;
   final bool service;
+
+  /// A vehicle shop has no event: the tile shows pickup to return instead.
+  final bool vehicle;
 
   @override
   Widget build(BuildContext context) {
@@ -233,15 +239,22 @@ class BookingTile extends StatelessWidget {
                     Icon(
                       service
                           ? Icons.event_available_outlined
+                          : vehicle
+                          ? Icons.two_wheeler_outlined
                           : Icons.celebration_outlined,
                       size: 16,
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      dateText(b.eventDate) +
-                          (b.eventTime.isEmpty
-                              ? ''
-                              : ' · ${timeText(b.eventTime)}'),
+                      vehicle
+                          ? '${dateText(b.pickupDate)}'
+                                '${b.hasHourly && b.pickupTime.isNotEmpty ? ' ${timeText(b.pickupTime)}' : ''}'
+                                ' → ${dateText(b.returnDate)}'
+                                '${b.hasHourly && b.returnTime.isNotEmpty ? ' ${timeText(b.returnTime)}' : ''}'
+                          : dateText(b.eventDate) +
+                                (b.eventTime.isEmpty
+                                    ? ''
+                                    : ' · ${timeText(b.eventTime)}'),
                       style: text.bodySmall?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),

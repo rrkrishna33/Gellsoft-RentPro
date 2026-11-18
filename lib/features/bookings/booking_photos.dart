@@ -16,6 +16,7 @@ import '../common/widgets.dart';
 String stageLabel(String stage) => switch (stage) {
   'pickup' => tr('Pickup'),
   'return' => tr('Return'),
+  'id' => tr('ID proof'),
   _ => tr('Other'),
 };
 
@@ -27,7 +28,9 @@ class PhotosSection extends ConsumerWidget {
 
   Future<void> _add(BuildContext context, WidgetRef ref) async {
     final isPro = ref.read(isProProvider);
-    if (!isPro && booking.photos.length >= FreePlan.photosPerBooking) {
+    // an ID picture does not count against the free photos
+    final counted = booking.photos.where((p) => p.stage != 'id').length;
+    if (!isPro && counted >= FreePlan.photosPerBooking) {
       await showProPrompt(context, ProFeature.unlimitedPhotos);
       return;
     }
@@ -60,7 +63,7 @@ class PhotosSection extends ConsumerWidget {
     } else {
       // the gallery: as many as the person ticks (the free plan's room is the
       // most it can take)
-      final room = FreePlan.photosPerBooking - booking.photos.length;
+      final room = FreePlan.photosPerBooking - counted;
       final paths = await PhotoStore.takeMany(limit: isPro ? null : room);
       if (paths.isEmpty) return;
       var skipped = 0;
@@ -91,6 +94,41 @@ class PhotosSection extends ConsumerWidget {
         await showProPrompt(context, ProFeature.unlimitedPhotos);
       }
     }
+    ref.invalidate(bookingProvider(booking.id));
+  }
+
+  /// A picture of the customer's ID, kept with the booking. It never uses up
+  /// the free photos.
+  Future<void> _addId(BuildContext context, WidgetRef ref) async {
+    final camera = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: Text(tr('Take photo')),
+              onTap: () => Navigator.pop(ctx, true),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(tr('Choose from gallery')),
+              onTap: () => Navigator.pop(ctx, false),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (camera == null || !context.mounted) return;
+    final path = camera
+        ? await PhotoStore.take(camera: true)
+        : (await PhotoStore.takeMany(limit: 1)).firstOrNull;
+    if (path == null) return;
+    await ref
+        .read(bookingRepoProvider)
+        .addPhoto(booking.id, path: path, stage: 'id', isPro: true);
     ref.invalidate(bookingProvider(booking.id));
   }
 
@@ -171,7 +209,7 @@ class PhotosSection extends ConsumerWidget {
               if (!isPro)
                 Text(
                   tr('{n} of {max} on the free plan', {
-                    'n': photos.length,
+                    'n': photos.where((p) => p.stage != 'id').length,
                     'max': FreePlan.photosPerBooking,
                   }),
                   style: text.bodySmall,
@@ -179,6 +217,63 @@ class PhotosSection extends ConsumerWidget {
             ],
           ),
         ),
+        if (photos.any((p) => p.stage == 'pickup') &&
+            photos.any((p) => p.stage == 'return'))
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr('Pickup and return side by side'),
+                    style: text.labelLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      for (final stage in const ['pickup', 'return']) ...[
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => _view(
+                              context,
+                              ref,
+                              photos.firstWhere((p) => p.stage == stage),
+                            ),
+                            child: Column(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.file(
+                                    File(
+                                      photos.firstWhere((p) => p.stage == stage).path,
+                                    ),
+                                    height: 150,
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => Container(
+                                      height: 150,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerHighest,
+                                      child: const Icon(Icons.broken_image_outlined),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(stageLabel(stage), style: text.labelMedium),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (stage == 'pickup') const SizedBox(width: 10),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -246,6 +341,14 @@ class PhotosSection extends ConsumerWidget {
                 ),
               ],
             ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => _addId(context, ref),
+            icon: const Icon(Icons.badge_outlined),
+            label: Text(tr('Add ID proof')),
           ),
         ),
       ],

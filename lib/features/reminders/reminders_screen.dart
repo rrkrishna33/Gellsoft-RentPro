@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
 import '../../core/share.dart';
+import '../../core/terms.dart';
 import '../../core/theme.dart';
 import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
@@ -74,7 +75,11 @@ class RemindersScreen extends ConsumerWidget {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
                         child: Text(
-                          reminderTitle(kind, service: service),
+                          reminderTitle(
+                            kind,
+                            service: service,
+                            vehicle: ref.watch(termsProvider).vehicle,
+                          ),
                           style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
@@ -103,11 +108,16 @@ const _order = [
   ReminderKind.balance,
 ];
 
-String reminderTitle(ReminderKind k, {bool service = false}) => switch (k) {
+String reminderTitle(ReminderKind k, {bool service = false, bool vehicle = false}) =>
+    switch (k) {
   ReminderKind.overdue => tr('Overdue returns'),
   ReminderKind.returnDue => tr('Due back soon'),
   ReminderKind.sendItems =>
-    service ? tr('Appointments coming up') : tr('Send the items'),
+    service
+        ? tr('Appointments coming up')
+        : vehicle
+        ? tr('Pickups coming up')
+        : tr('Send the items'),
   ReminderKind.balance => tr('Money to collect'),
 };
 
@@ -135,9 +145,13 @@ class ReminderTile extends ConsumerWidget {
       ReminderKind.sendItems when service =>
         '${tr('Appointment')} ${whenText(days)} · ${dateText(item.date)}'
             '${b.eventTime.isEmpty ? '' : ' · ${timeText(b.eventTime)}'}',
-      ReminderKind.sendItems => '${tr('Pickup')} ${whenText(days)} · ${dateText(item.date)}',
+      ReminderKind.sendItems =>
+        '${tr('Pickup')} ${whenText(days)} · ${dateText(item.date)}'
+            '${b.hasHourly && b.pickupTime.isNotEmpty ? ' · ${timeText(b.pickupTime)}' : ''}',
       ReminderKind.balance => tr('Due {amount}', {'amount': money(b.balanceDue)}),
-      _ => '${tr('Return')} ${whenText(days)} · ${dateText(item.date)}',
+      _ =>
+        '${tr('Return')} ${whenText(days)} · ${dateText(item.date)}'
+            '${b.hasHourly && b.returnTime.isNotEmpty ? ' · ${timeText(b.returnTime)}' : ''}',
     };
     final urgent = item.kind == ReminderKind.overdue ||
         (item.kind == ReminderKind.sendItems && days <= 0);

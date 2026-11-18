@@ -27,6 +27,11 @@ class CustomersScreen extends ConsumerWidget {
       ref.invalidate(customersProvider);
     }
 
+    Future<void> remove(Customer c) async {
+      final removed = await removeCustomerFlow(context, ref, c);
+      if (removed) ref.invalidate(customersProvider);
+    }
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Column(
@@ -82,6 +87,7 @@ class CustomersScreen extends ConsumerWidget {
                   itemBuilder: (_, i) => _CustomerTile(
                     customer: list[i],
                     onTap: canEdit ? () => open(list[i]) : null,
+                    onRemove: canEdit ? () => remove(list[i]) : null,
                   ),
                 );
               },
@@ -94,9 +100,16 @@ class CustomersScreen extends ConsumerWidget {
 }
 
 class _CustomerTile extends StatelessWidget {
-  const _CustomerTile({required this.customer, required this.onTap});
+  const _CustomerTile({
+    required this.customer,
+    required this.onTap,
+    this.onRemove,
+  });
   final Customer customer;
   final VoidCallback? onTap;
+
+  /// Takes the customer off the list; null when this person may not.
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -144,6 +157,28 @@ class _CustomerTile extends StatelessWidget {
                       ),
                       if (customer.phone.isNotEmpty)
                         Text(customer.phone, style: text.bodySmall),
+                      if (customer.warning.trim().isNotEmpty)
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.warning_amber_rounded,
+                              size: 14,
+                              color: Palette.warning,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                customer.warning.trim(),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text.bodySmall?.copyWith(
+                                  color: Palette.warning,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                     ],
                   ),
                 ),
@@ -156,6 +191,12 @@ class _CustomerTile extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (onRemove != null)
+                  IconButton(
+                    tooltip: tr('Remove this customer'),
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: onRemove,
+                  ),
               ],
             ),
           ),

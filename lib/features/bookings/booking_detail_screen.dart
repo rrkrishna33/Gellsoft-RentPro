@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/booking_math.dart';
 import '../../core/format.dart';
 import '../../core/share.dart';
 import '../../core/whatsapp_pdf.dart';
@@ -11,6 +12,7 @@ import '../../core/theme.dart';
 import '../../data/booking_models.dart';
 import '../../data/booking_repo.dart';
 import '../../data/business_profile.dart';
+import '../../data/repositories.dart';
 import '../../data/invoice_repo.dart';
 import '../../data/reminders.dart';
 import '../../data/staff.dart';
@@ -168,6 +170,76 @@ class BookingDetailScreen extends ConsumerWidget {
           );
         }
 
+        /// Makes the rental agreement and shares it, or sends it on WhatsApp.
+        Future<void> agreement() async {
+          if (shop == null) return;
+          if (!await requirePro(context, ref, ProFeature.agreement)) return;
+          if (!context.mounted) return;
+          final how = await showModalBottomSheet<String>(
+            context: context,
+            showDragHandle: true,
+            builder: (ctx) => SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.chat_outlined),
+                    title: Text(tr('Send on WhatsApp')),
+                    onTap: () => Navigator.pop(ctx, 'whatsapp'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.ios_share_outlined),
+                    title: Text(tr('Share PDF')),
+                    onTap: () => Navigator.pop(ctx, 'share'),
+                  ),
+                ],
+              ),
+            ),
+          );
+          if (how == null) return;
+          final customer = await ref
+              .read(customerRepoProvider)
+              .get(b.customerId);
+          final bytes = await buildAgreementPdf(
+            shop: shop,
+            booking: b,
+            customer: customer,
+            showLogo: ref.read(isProProvider),
+          );
+          final name = 'agreement-${b.number}.pdf';
+          if (how == 'whatsapp') {
+            await sendPdfOnWhatsApp(
+              bytes: bytes,
+              fileName: name,
+              phone: b.customerPhone,
+              message: tr('Rental agreement for booking #{n}', {'n': b.number}),
+            );
+          } else {
+            await sharePdf(bytes, name);
+          }
+        }
+
+        /// Changes the return day (and time, for an hourly booking): the rent
+        /// is worked out again and the invoice follows.
+        Future<void> extendBooking() async {
+          final r = await showDialog<({DateTime date, String time})>(
+            context: context,
+            builder: (_) => _ExtendDialog(booking: b),
+          );
+          if (r == null || !context.mounted) return;
+          await _run(context, ref, () async {
+            await repo.extend(
+              b.id,
+              returnDate: r.date,
+              returnTime: b.hasHourly ? r.time : null,
+              gst: shop?.gst ?? GstConfig.off,
+            );
+            await ref.read(invoiceRepoProvider).refreshForBooking(b.id);
+            ref.invalidate(bookingInvoiceProvider(b.id));
+            ref.invalidate(invoicesProvider);
+          });
+        }
+
         Future<void> pickUp() => _run(context, ref, () => repo.markPickedUp(b.id));
         Future<void> done() => _run(context, ref, () => repo.markDone(b.id));
 
@@ -212,12 +284,14 @@ class BookingDetailScreen extends ConsumerWidget {
         Future<void> addCharge({
           ChargeKind kind = ChargeKind.damage,
           String note = '',
+          double amount = 0,
         }) async {
           if (!await requirePro(context, ref, ProFeature.charges)) return;
           if (!context.mounted) return;
           final c = await showDialog<_ChargeInput>(
             context: context,
-            builder: (_) => _ChargeDialog(kind: kind, note: note),
+            builder: (_) =>
+                _ChargeDialog(kind: kind, note: note, amount: amount),
           );
           if (c == null || !context.mounted) return;
           await _run(
@@ -256,16 +330,29 @@ class BookingDetailScreen extends ConsumerWidget {
           // late: offer a late fee before the items are booked in
           final today = dayOf(DateTime.now());
           if (b.isOverdue(today) && ref.read(isProProvider)) {
+            final due = b.dueBack;
             final days = today.difference(b.returnDate).inDays;
+            // late by the hour for an hourly booking: each started hour counts
+            final lateHours = due == null
+                ? 0
+                : (DateTime.now().difference(due).inMinutes + 59) ~/ 60;
+            final lateText = due == null
+                ? tr('{n} days late', {'n': days})
+                : tr('{n} hours late', {'n': lateHours});
             final fee = await showDialog<bool>(
               context: context,
               builder: (_) => AlertDialog(
                 title: Text(tr('Returned late')),
                 content: Text(
-                  tr(
-                    'These items are {n} days late. Add a late fee for them?',
-                    {'n': days},
-                  ),
+                  due == null
+                      ? tr(
+                          'These items are {n} days late. Add a late fee for them?',
+                          {'n': days},
+                        )
+                      : tr(
+                          'These items are {n} hours late. Add a late fee for them?',
+                          {'n': lateHours},
+                        ),
                 ),
                 actions: [
                   TextButton(
@@ -281,9 +368,19 @@ class BookingDetailScreen extends ConsumerWidget {
             );
             if (fee == null || !context.mounted) return;
             if (fee) {
+              // the items' own late fee rates, when the shop set them
+              var suggested = 0.0;
+              for (final l in b.lines) {
+                final item = await ref.read(itemRepoProvider).get(l.itemId);
+                if (item == null || item.lateFee <= 0) continue;
+                final units = l.rateType.isHourly ? lateHours : lateDaysFor(b, today);
+                suggested += item.lateFee * units * l.qty;
+              }
+              if (!context.mounted) return;
               await addCharge(
                 kind: ChargeKind.late,
-                note: tr('{n} days late', {'n': days}),
+                note: lateText,
+                amount: suggested,
               );
               if (!context.mounted) return;
             }
@@ -297,16 +394,17 @@ class BookingDetailScreen extends ConsumerWidget {
             );
             if (p == null || !context.mounted) return;
             await _run(context, ref, () async {
-              if (p.amount > 0) {
-                await repo.addPayment(
-                  b.id,
-                  kind: PaymentKind.refund,
-                  amount: p.amount,
-                  mode: p.mode,
-                  note: p.note,
-                );
-              }
+              // what is not handed back is kept for damage, and charged
+              await repo.settleDeposit(
+                b.id,
+                refund: p.amount,
+                mode: p.mode,
+                reason: p.note,
+              );
               await repo.markReturned(b.id);
+              await ref.read(invoiceRepoProvider).refreshForBooking(b.id);
+              ref.invalidate(bookingInvoiceProvider(b.id));
+              ref.invalidate(invoicesProvider);
             });
           } else {
             await _run(context, ref, () => repo.markReturned(b.id));
@@ -366,7 +464,7 @@ class BookingDetailScreen extends ConsumerWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: [
-                _Header(booking: b, service: service),
+                _Header(booking: b, service: service, hasEvent: terms.hasEvent),
                 const SizedBox(height: 16),
                 _Card(
                   title: terms.items,
@@ -375,9 +473,11 @@ class BookingDetailScreen extends ConsumerWidget {
                       ListTile(
                         title: Text(l.label),
                         subtitle: Text(
-                          l.qty > 1
-                              ? '${l.rateType.label} · ${money(l.rate)} × ${l.qty}'
-                              : '${l.rateType.label} · ${money(l.rate)}',
+                          [
+                            '${l.rateType.label} · ${money(l.rate)}',
+                            if (l.rateType.isHourly) hoursText(l.hours),
+                            if (l.qty > 1) '× ${l.qty}',
+                          ].join(' · '),
                         ),
                         trailing: Text(
                           money(l.amount),
@@ -464,6 +564,8 @@ class BookingDetailScreen extends ConsumerWidget {
                             _row(context, tr('Deposit taken'), money(b.depositTaken)),
                             if (b.depositRefunded > 0)
                               _row(context, tr('Deposit given back'), money(b.depositRefunded)),
+                            if (b.depositKept > 0)
+                              _row(context, tr('Deposit kept for damage'), money(b.depositKept)),
                             _row(context, tr('Deposit held now'), money(b.depositHeld), bold: true),
                           ],
                         ],
@@ -567,6 +669,12 @@ class BookingDetailScreen extends ConsumerWidget {
                         Icons.local_shipping_outlined,
                         tr('Send courier details on WhatsApp'),
                         () => whatsApp(dispatchMessage(b, shop)),
+                      ),
+                    if (!service && b.status != BookingStatus.cancelled)
+                      _action(
+                        Icons.description_outlined,
+                        tr('Rental agreement'),
+                        agreement,
                       ),
                     if (remindKind() != null && shop != null)
                       _action(
@@ -688,6 +796,16 @@ class BookingDetailScreen extends ConsumerWidget {
                     label: Text(tr('Dispatch by courier')),
                   ),
                 ],
+                if (b.status.holdsItems &&
+                    !service &&
+                    perms.can(Permission.book)) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: extendBooking,
+                    icon: const Icon(Icons.update),
+                    label: Text(tr('Extend or change the return')),
+                  ),
+                ],
                 if (b.status.isOut && perms.can(Permission.book))
                   FilledButton.icon(
                     onPressed: back,
@@ -760,9 +878,16 @@ class _Card extends StatelessWidget {
 
 /// The top card: customer, status and the three dates.
 class _Header extends StatelessWidget {
-  const _Header({required this.booking, required this.service});
+  const _Header({
+    required this.booking,
+    required this.service,
+    required this.hasEvent,
+  });
   final Booking booking;
   final bool service;
+
+  /// A vehicle shop has no event day, so none is shown.
+  final bool hasEvent;
 
   @override
   Widget build(BuildContext context) {
@@ -770,13 +895,13 @@ class _Header extends StatelessWidget {
     final style = AuroraStyle.of(context);
     final text = Theme.of(context).textTheme;
     final overdue = b.isOverdue(dayOf(DateTime.now()));
-    Widget date(String label, DateTime d) => Expanded(
+    Widget date(String label, DateTime d, [String time = '']) => Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label, style: text.labelSmall?.copyWith(color: Colors.white70)),
           Text(
-            dateText(d),
+            time.isEmpty ? dateText(d) : '${dateText(d)}\n${timeText(time)}',
             style: text.bodyMedium?.copyWith(
               color: Colors.white,
               fontWeight: FontWeight.w700,
@@ -848,11 +973,21 @@ class _Header extends StatelessWidget {
           else
             Row(
               children: [
-                date(tr('Pickup'), b.pickupDate),
-                date(tr('Event'), b.eventDate),
-                date(tr('Return'), b.returnDate),
+                date(tr('Pickup'), b.pickupDate, b.hasHourly ? b.pickupTime : ''),
+                if (hasEvent) date(tr('Event'), b.eventDate),
+                date(tr('Return'), b.returnDate, b.hasHourly ? b.returnTime : ''),
               ],
             ),
+          if (b.trialDate != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              tr('Trial or fitting: {date}', {'date': dateText(b.trialDate!)}),
+              style: text.bodyMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
           if (b.createdBy.isNotEmpty) ...[
             const SizedBox(height: 10),
             Text(
@@ -949,9 +1084,12 @@ class _ChargeInput {
 
 /// A late-return or damage charge: what for, how much, and a note.
 class _ChargeDialog extends StatefulWidget {
-  const _ChargeDialog({required this.kind, this.note = ''});
+  const _ChargeDialog({required this.kind, this.note = '', this.amount = 0});
   final ChargeKind kind;
   final String note;
+
+  /// An amount to start with (the item late fee rates add up to it), or 0.
+  final double amount;
 
   @override
   State<_ChargeDialog> createState() => _ChargeDialogState();
@@ -959,7 +1097,9 @@ class _ChargeDialog extends StatefulWidget {
 
 class _ChargeDialogState extends State<_ChargeDialog> {
   late ChargeKind _kind = widget.kind;
-  final _amount = TextEditingController();
+  late final _amount = TextEditingController(
+    text: widget.amount > 0 ? amountText(widget.amount) : '',
+  );
   late final _note = TextEditingController(text: widget.note);
   String? _error;
 
@@ -1051,7 +1191,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   late final double _max = switch (widget.kind) {
     PaymentKind.advance || PaymentKind.balance => widget.booking.balanceDue,
     PaymentKind.deposit => widget.booking.depositDue,
-    PaymentKind.refund => widget.booking.depositHeld,
+    PaymentKind.refund || PaymentKind.keep => widget.booking.depositHeld,
   };
   late final _amount = TextEditingController(text: amountText(_max));
   final _note = TextEditingController();
@@ -1069,6 +1209,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     PaymentKind.advance || PaymentKind.balance => tr('Take payment'),
     PaymentKind.deposit => tr('Take deposit'),
     PaymentKind.refund => tr('Give deposit back'),
+    PaymentKind.keep => tr('Keep from the deposit'),
   };
 
   void _ok() {
@@ -1096,9 +1237,16 @@ class _PaymentDialogState extends State<_PaymentDialog> {
             controller: _amount,
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               labelText: tr('Amount (₹)'),
-              helperText: tr('Up to {max}', {'max': money(_max)}),
+              helperText: widget.kind == PaymentKind.refund &&
+                      parseAmount(_amount.text) < _max - 0.005
+                  ? tr(
+                      'Kept from the deposit: {amount}. It is charged on the booking and on the invoice.',
+                      {'amount': money(_max - parseAmount(_amount.text))},
+                    )
+                  : tr('Up to {max}', {'max': money(_max)}),
               errorText: _error,
             ),
           ),
@@ -1137,4 +1285,103 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       ),
     ],
   );
+}
+
+/// Pick a new return day (and time, for an hourly booking).
+class _ExtendDialog extends StatefulWidget {
+  const _ExtendDialog({required this.booking});
+  final Booking booking;
+
+  @override
+  State<_ExtendDialog> createState() => _ExtendDialogState();
+}
+
+class _ExtendDialogState extends State<_ExtendDialog> {
+  late DateTime _date = widget.booking.returnDate;
+  late String _time = widget.booking.returnTime.isEmpty
+      ? '12:00'
+      : widget.booking.returnTime;
+
+  Future<void> _pickDate() async {
+    final b = widget.booking;
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: b.pickupDate,
+      lastDate: dayOf(DateTime.now()).add(const Duration(days: 365 * 3)),
+    );
+    if (d != null) setState(() => _date = dayOf(d));
+  }
+
+  Future<void> _pickTime() async {
+    final m = minutesOfTime(_time) ?? 720;
+    final t = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: m ~/ 60, minute: m % 60),
+    );
+    if (t != null) {
+      setState(() {
+        _time =
+            '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = widget.booking;
+    return AlertDialog(
+      title: Text(tr('Extend or change the return')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr('Now due back: {when}', {
+              'when': b.hasHourly && b.returnTime.isNotEmpty
+                  ? '${dateText(b.returnDate)} ${timeText(b.returnTime)}'
+                  : dateText(b.returnDate),
+            }),
+          ),
+          const SizedBox(height: 8),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.calendar_today_outlined),
+            title: Text(tr('New return date')),
+            trailing: Text(dateText(_date)),
+            onTap: _pickDate,
+          ),
+          if (b.hasHourly)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.schedule),
+              title: Text(tr('New return time')),
+              trailing: Text(timeText(_time)),
+              onTap: _pickTime,
+            ),
+          const SizedBox(height: 6),
+          Text(
+            tr('The rent is worked out again for the new time, with the rents already agreed. The invoice is updated too.'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(tr('Cancel')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, (date: _date, time: _time)),
+          child: Text(tr('Save')),
+        ),
+      ],
+    );
+  }
+}
+
+/// Whole days an item rented by the day is late on [today].
+int lateDaysFor(Booking b, DateTime today) {
+  final d = today.difference(b.returnDate).inDays;
+  return d < 0 ? 0 : d;
 }

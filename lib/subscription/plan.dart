@@ -46,7 +46,13 @@ enum ProFeature {
   export('Export to Excel (CSV) and GSTR-1 sheets'),
   bulkReminders('Remind everyone who owes in one go'),
   itemPhotos('More pictures of each item'),
-  catalog('Share a catalog of your items');
+  catalog('Share a catalog of your items'),
+  agreement('Rental agreement PDF'),
+  buffer('A cleaning or servicing gap after every return'),
+  longRates('Weekly and monthly rates'),
+  lateRule('A late fee rate for each item'),
+  repairLog('Repair and damage log for each item'),
+  itemProfit('Profit report for each item');
 
   /// English wording; also the translation key (see `tr`).
   final String en;

@@ -20,4 +20,7 @@ String bookingErrorText(BookingException e) => switch (e.error) {
   BookingError.badState => tr('This booking cannot be changed any more.'),
   BookingError.badAmount => tr('That amount is not allowed.'),
   BookingError.badDiscount => tr('The discount cannot be more than the rent.'),
+  BookingError.badTimes => tr(
+    'Set a pickup time and a return time, with the return after the pickup.',
+  ),
 };

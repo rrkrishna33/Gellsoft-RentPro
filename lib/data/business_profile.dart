@@ -46,6 +46,13 @@ class BusinessProfile {
   /// Only the name is kept (the folder differs between phones).
   final String logoName;
 
+  /// The shop's UPI id (for example name@bank). When set, invoices and
+  /// receipts with money still to pay carry a QR the customer can scan.
+  final String upiId;
+
+  /// The terms printed on a rental agreement. Empty uses the standard terms.
+  final String agreementTerms;
+
   const BusinessProfile({
     required this.name,
     required this.type,
@@ -60,7 +67,25 @@ class BusinessProfile {
     this.invoicePrefix = 'RNT',
     this.invoiceFooter = '',
     this.logoName = '',
+    this.upiId = '',
+    this.agreementTerms = '',
   });
+
+  /// The `upi://pay` link behind the payment QR, or null without a UPI id.
+  String? upiLink({required double amount, required String note}) {
+    if (upiId.trim().isEmpty) return null;
+    return Uri(
+      scheme: 'upi',
+      host: 'pay',
+      queryParameters: {
+        'pa': upiId.trim(),
+        'pn': name,
+        'am': amount.toStringAsFixed(2),
+        'cu': 'INR',
+        'tn': note,
+      },
+    ).toString();
+  }
 
   GstConfig get gst => GstConfig(enabled: gstEnabled, inclusive: taxInclusive);
 
@@ -78,6 +103,8 @@ class BusinessProfile {
     String? invoicePrefix,
     String? invoiceFooter,
     String? logoName,
+    String? upiId,
+    String? agreementTerms,
   }) => BusinessProfile(
     name: name ?? this.name,
     type: type ?? this.type,
@@ -92,6 +119,8 @@ class BusinessProfile {
     invoicePrefix: invoicePrefix ?? this.invoicePrefix,
     invoiceFooter: invoiceFooter ?? this.invoiceFooter,
     logoName: logoName ?? this.logoName,
+    upiId: upiId ?? this.upiId,
+    agreementTerms: agreementTerms ?? this.agreementTerms,
   );
 
   /// The logo file, when the shop has one and it is still on the phone.
@@ -126,6 +155,8 @@ class BusinessProfile {
     await sp.setString(k('prefix'), invoicePrefix);
     await sp.setString(k('footer'), invoiceFooter);
     await sp.setString(k('logo'), logoName);
+    await sp.setString(k('upi'), upiId);
+    await sp.setString(k('terms'), agreementTerms);
   }
 
   /// The details of a shop (the open one unless [shop] is given), or null
@@ -152,6 +183,8 @@ class BusinessProfile {
       invoicePrefix: sp.getString(k('prefix')) ?? 'RNT',
       invoiceFooter: sp.getString(k('footer')) ?? '',
       logoName: sp.getString(k('logo')) ?? '',
+      upiId: sp.getString(k('upi')) ?? '',
+      agreementTerms: sp.getString(k('terms')) ?? '',
     );
   }
 }

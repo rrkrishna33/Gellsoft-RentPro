@@ -41,6 +41,10 @@ enum BookingError {
 
   /// The discount is more than the rent.
   badDiscount,
+
+  /// An item is charged by the hour but the pickup or return time is missing,
+  /// or the return is not after the pickup.
+  badTimes,
 }
 
 class BookingException implements Exception {
@@ -64,12 +68,27 @@ class BookingDraft {
 
   /// How many of each item (item id -> pieces). An item not listed is one.
   final Map<int, int> quantities;
+
+  /// The rent and deposit of ONE piece for this booking when the shop agreed
+  /// something other than the item's own (item id -> amount). An item not
+  /// listed uses the rate saved on the item. These are kept on the booking, so
+  /// the totals, invoices and reports all follow them.
+  final Map<int, double> rates;
+  final Map<int, double> deposits;
   final double discount;
   final String notes;
   final int remindDays;
 
   /// The appointment time ("14:30") of a service booking, or ''.
   final String eventTime;
+
+  /// When the items go out and come back ("14:30"). Needed when an item is
+  /// charged by the hour; kept '' otherwise.
+  final String pickupTime;
+  final String returnTime;
+
+  /// The day of a trial or fitting before the event, or null.
+  final DateTime? trialDate;
 
   /// Who is making the booking, or '' when staff logins are off.
   final String createdBy;
@@ -81,10 +100,15 @@ class BookingDraft {
     required this.returnDate,
     required this.itemIds,
     this.quantities = const {},
+    this.rates = const {},
+    this.deposits = const {},
     this.discount = 0,
     this.notes = '',
     this.remindDays = 2,
     this.eventTime = '',
+    this.pickupTime = '',
+    this.returnTime = '',
+    this.trialDate,
     this.createdBy = '',
   });
 
@@ -103,6 +127,10 @@ class ItemConflict {
   final DateTime pickupDate;
   final DateTime returnDate;
 
+  /// The times ("14:30") of an hourly booking, or ''.
+  final String pickupTime;
+  final String returnTime;
+
   /// How many pieces the shop has, and how many of them are free on every
   /// one of the days asked about.
   final int stock;
@@ -115,6 +143,8 @@ class ItemConflict {
     required this.customerName,
     required this.pickupDate,
     required this.returnDate,
+    this.pickupTime = '',
+    this.returnTime = '',
     this.stock = 1,
     this.free = 0,
   });
@@ -173,7 +203,11 @@ class _Prepared {
     required this.deposit,
     required this.tax,
     required this.payable,
+    required this.hourly,
   });
+
+  /// Some item is charged by the hour, so the booking keeps its times.
+  final bool hourly;
   final List<Map<String, Object?>> lines;
   final double rent;
   final double deposit;
@@ -328,6 +362,9 @@ class BookingRepo {
           notes: (r['notes'] as String?) ?? '',
           remindDays: (r['remind_days'] as int?) ?? 2,
           eventTime: (r['event_time'] as String?) ?? '',
+          pickupTime: (r['pickup_time'] as String?) ?? '',
+          returnTime: (r['return_time'] as String?) ?? '',
+          trialDate: r['trial_date'] == null ? null : _day(r['trial_date']),
           createdBy: (r['created_by'] as String?) ?? '',
           courierName: (r['courier_name'] as String?) ?? '',
           courierNo: (r['courier_no'] as String?) ?? '',
@@ -359,6 +396,7 @@ class BookingRepo {
               name: l['name'] as String,
               rateType: RateType.fromName(l['rate_type'] as String?),
               qty: ((l['qty'] as num?)?.toInt() ?? 1).clamp(1, 1 << 30),
+              hours: ((l['hours'] as num?)?.toInt() ?? 1).clamp(1, 1 << 30),
               rate: (l['rate'] as num).toDouble(),
               deposit: (l['deposit'] as num).toDouble(),
               amount: (l['amount'] as num).toDouble(),
@@ -434,12 +472,24 @@ class BookingRepo {
     required List<int> itemIds,
     required DateTime pickup,
     required DateTime ret,
+    String pickupTime = '',
+    String returnTime = '',
     Map<int, int> quantities = const {},
     int? exceptBookingId,
     DateTime? now,
   }) async {
     final d = await AppDatabase.instance.db;
-    return _conflicts(d, itemIds, quantities, pickup, ret, exceptBookingId, now);
+    return _conflicts(
+      d,
+      itemIds,
+      quantities,
+      pickup,
+      ret,
+      pickupTime,
+      returnTime,
+      exceptBookingId,
+      now,
+    );
   }
 
   /// For each of [itemIds]: how many pieces the shop has and how many are free
@@ -448,11 +498,22 @@ class BookingRepo {
     required List<int> itemIds,
     required DateTime pickup,
     required DateTime ret,
+    String pickupTime = '',
+    String returnTime = '',
     int? exceptBookingId,
     DateTime? now,
   }) async {
     final d = await AppDatabase.instance.db;
-    return _availability(d, itemIds, pickup, ret, exceptBookingId, now);
+    return _availability(
+      d,
+      itemIds,
+      pickup,
+      ret,
+      pickupTime,
+      returnTime,
+      exceptBookingId,
+      now,
+    );
   }
 
   Future<Map<int, ItemConflict>> _conflicts(
@@ -461,6 +522,8 @@ class BookingRepo {
     Map<int, int> quantities,
     DateTime pickup,
     DateTime ret,
+    String pickupTime,
+    String returnTime,
     int? exceptBookingId,
     DateTime? now,
   ) async {
@@ -469,6 +532,8 @@ class BookingRepo {
       itemIds,
       pickup,
       ret,
+      pickupTime,
+      returnTime,
       exceptBookingId,
       now,
     );
@@ -484,6 +549,8 @@ class BookingRepo {
         customerName: h?.customerName ?? '',
         pickupDate: h?.pickupDate ?? pickup,
         returnDate: h?.returnDate ?? ret,
+        pickupTime: h?.pickupTime ?? '',
+        returnTime: h?.returnTime ?? '',
         stock: a.stock,
         free: a.free,
       );
@@ -496,40 +563,74 @@ class BookingRepo {
     List<int> itemIds,
     DateTime pickup,
     DateTime ret,
+    String pickupTime,
+    String returnTime,
     int? exceptBookingId,
     DateTime? now,
   ) async {
     if (itemIds.isEmpty) return const {};
-    final today = dayOf(now ?? DateTime.now());
+    final at = now ?? DateTime.now();
+    final endOfToday = DateTime(at.year, at.month, at.day + 1);
     final marks = List.filled(itemIds.length, '?').join(',');
     final stockRows = await d.rawQuery(
-      'SELECT id, quantity FROM items WHERE id IN ($marks)',
+      'SELECT id, quantity, rate_type, buffer_hours FROM items WHERE id IN ($marks)',
       itemIds,
     );
     final stock = {
       for (final r in stockRows)
         r['id'] as int: ((r['quantity'] as num?)?.toInt() ?? 1).clamp(1, 1 << 30),
     };
+    // the time each wanted item would be kept: whole days, or by the hour
+    final wanted = {
+      for (final r in stockRows)
+        r['id'] as int: _withGap(
+          heldWindow(
+            hourly: RateType.fromName(r['rate_type'] as String?).isHourly,
+            pickup: pickup,
+            ret: ret,
+            pickupTime: pickupTime,
+            returnTime: returnTime,
+          ),
+          r['buffer_hours'],
+        ),
+    };
     final rows = await d.rawQuery('''
-      SELECT bi.item_id, bi.qty, b.id AS booking_id, b.number, b.pickup_date,
-             b.return_date, b.status, c.name AS c_name
+      SELECT bi.item_id, bi.qty, bi.rate_type, b.id AS booking_id, b.number,
+             b.pickup_date, b.return_date, b.pickup_time, b.return_time,
+             b.status, c.name AS c_name, it.buffer_hours
       FROM booking_items bi
+      JOIN items it ON it.id = bi.item_id
       JOIN bookings b ON b.id = bi.booking_id
       JOIN customers c ON c.id = b.customer_id
       WHERE b.deleted = 0 AND b.status IN ('booked', 'picked_up', 'dispatched')
         AND bi.item_id IN ($marks)
     ''', itemIds);
-    // the bookings that share a day with the dates asked about, per item
+    // the bookings that share some time with the one asked about, per item
     final overlaps = <int, List<({DateTime from, DateTime to, int qty, ItemConflict who})>>{};
     for (final r in rows) {
       final bookingId = r['booking_id'] as int;
       if (bookingId == exceptBookingId) continue;
-      final from = _day(r['pickup_date']);
-      var to = _day(r['return_date']);
-      // still out and late: it is not back, so it is held until it is
-      if (r['status'] != 'booked' && to.isBefore(today)) to = today;
-      if (!rangesOverlap(pickup, ret, from, to)) continue;
       final id = r['item_id'] as int;
+      final want = wanted[id];
+      if (want == null) continue;
+      final pDate = _day(r['pickup_date']);
+      final rDate = _day(r['return_date']);
+      final pTime = (r['pickup_time'] as String?) ?? '';
+      final rTime = (r['return_time'] as String?) ?? '';
+      final w = heldWindow(
+        hourly: RateType.fromName(r['rate_type'] as String?).isHourly,
+        pickup: pDate,
+        ret: rDate,
+        pickupTime: pTime,
+        returnTime: rTime,
+      );
+      final from = w.from;
+      var to = w.to;
+      // still out and late: it is not back, so it is held until it is
+      if (r['status'] != 'booked' && !to.isAfter(at)) to = endOfToday;
+      // and kept back for cleaning or servicing after it returns
+      to = _withGap((from: from, to: to), r['buffer_hours']).to;
+      if (!(from.isBefore(want.to) && want.from.isBefore(to))) continue;
       overlaps.putIfAbsent(id, () => []).add((
         from: from,
         to: to,
@@ -539,30 +640,35 @@ class BookingRepo {
           bookingId: bookingId,
           bookingNumber: r['number'] as int,
           customerName: r['c_name'] as String,
-          pickupDate: from,
-          returnDate: to,
+          pickupDate: pDate,
+          returnDate: rDate,
+          pickupTime: pTime,
+          returnTime: rTime,
         ),
       ));
     }
-    final p0 = dayOf(pickup), r0 = dayOf(ret);
     final out = <int, ItemAvailability>{};
     for (final id in itemIds) {
       final have = stock[id] ?? 1;
       final list = overlaps[id] ?? const [];
-      // The most pieces held on any single day is found on the first day or
-      // on a day some booking starts, so only those days need counting.
-      final days = <DateTime>{
-        p0,
-        for (final o in list)
-          if (!o.from.isBefore(p0) && !o.from.isAfter(r0)) o.from,
-      };
+      final want = wanted[id];
+      // The most pieces held at any one moment is found at the start of the
+      // time asked about or at a moment some booking starts, so only those
+      // moments need counting.
       var peak = 0;
-      for (final day in days) {
-        var used = 0;
-        for (final o in list) {
-          if (!day.isBefore(o.from) && !day.isAfter(o.to)) used += o.qty;
+      if (want != null) {
+        final moments = <DateTime>{
+          want.from,
+          for (final o in list)
+            if (!o.from.isBefore(want.from) && o.from.isBefore(want.to)) o.from,
+        };
+        for (final t in moments) {
+          var used = 0;
+          for (final o in list) {
+            if (!t.isBefore(o.from) && t.isBefore(o.to)) used += o.qty;
+          }
+          if (used > peak) peak = used;
         }
-        if (used > peak) peak = used;
       }
       final free = have - peak < 0 ? 0 : have - peak;
       ItemConflict? holder;
@@ -575,6 +681,8 @@ class BookingRepo {
           customerName: first.customerName,
           pickupDate: first.pickupDate,
           returnDate: first.returnDate,
+          pickupTime: first.pickupTime,
+          returnTime: first.returnTime,
           stock: have,
           free: free,
         );
@@ -635,6 +743,11 @@ class BookingRepo {
         'notes': draft.notes.trim(),
         'remind_days': draft.remindDays,
         'event_time': draft.eventTime,
+        'pickup_time': p.hourly ? draft.pickupTime : '',
+        'return_time': p.hourly ? draft.returnTime : '',
+        'trial_date': draft.trialDate == null
+            ? null
+            : dayOf(draft.trialDate!).millisecondsSinceEpoch,
         'created_by': draft.createdBy.trim(),
         'created_at': ms,
       });
@@ -694,6 +807,11 @@ class BookingRepo {
           'notes': draft.notes.trim(),
           'remind_days': draft.remindDays,
           'event_time': draft.eventTime,
+          'pickup_time': p.hourly ? draft.pickupTime : '',
+          'return_time': p.hourly ? draft.returnTime : '',
+          'trial_date': draft.trialDate == null
+              ? null
+              : dayOf(draft.trialDate!).millisecondsSinceEpoch,
           'updated_at': at.millisecondsSinceEpoch,
         },
         where: 'id = ?',
@@ -702,6 +820,57 @@ class BookingRepo {
       await txn.delete('booking_items', where: 'booking_id = ?', whereArgs: [id]);
       await _insertLines(txn, id, p.lines);
     });
+  }
+
+  /// The draft that describes [b] exactly as it stands, with the agreed rents.
+  BookingDraft draftOf(
+    Booking b, {
+    DateTime? returnDate,
+    String? returnTime,
+    DateTime? eventDate,
+  }) => BookingDraft(
+    customerId: b.customerId,
+    eventDate: eventDate ?? b.eventDate,
+    pickupDate: b.pickupDate,
+    returnDate: returnDate ?? b.returnDate,
+    itemIds: [for (final l in b.lines) l.itemId],
+    quantities: {for (final l in b.lines) l.itemId: l.qty},
+    rates: {for (final l in b.lines) l.itemId: l.rate},
+    deposits: {for (final l in b.lines) l.itemId: l.deposit},
+    discount: b.discount,
+    notes: b.notes,
+    remindDays: b.remindDays,
+    eventTime: b.eventTime,
+    pickupTime: b.pickupTime,
+    returnTime: returnTime ?? b.returnTime,
+    trialDate: b.trialDate,
+    createdBy: b.createdBy,
+  );
+
+  /// Moves the return of a booking that has not been returned: more days (or
+  /// hours), or fewer. The rent is worked out again for the new time with the
+  /// agreed rents, and the item must be free for it. Throws
+  /// [BookingException] otherwise.
+  Future<void> extend(
+    int id, {
+    required DateTime returnDate,
+    String? returnTime,
+    GstConfig gst = GstConfig.off,
+    DateTime? now,
+  }) async {
+    final b = await get(id);
+    if (b == null || !b.status.holdsItems) {
+      throw const BookingException(BookingError.badState);
+    }
+    final ret = dayOf(returnDate);
+    // the event stays unless the new return is before it
+    final event = ret.isBefore(b.eventDate) ? ret : b.eventDate;
+    await update(
+      id,
+      draftOf(b, returnDate: ret, returnTime: returnTime, eventDate: event),
+      gst: gst,
+      now: now,
+    );
   }
 
   void _checkDiscount(double discount, double rent) {
@@ -749,28 +918,66 @@ class BookingRepo {
     final amounts = <double>[];
     final rates = <double>[];
     final base = <Map<String, Object?>>[];
+    final hourly = rows.any(
+      (r) => RateType.fromName(r['rate_type'] as String?).isHourly,
+    );
+    if (hourly &&
+        !validHourlySpan(
+          pickup,
+          draft.pickupTime,
+          ret,
+          draft.returnTime,
+        )) {
+      throw const BookingException(BookingError.badTimes);
+    }
+    final hours = hourly
+        ? rentalHours(pickup, draft.pickupTime, ret, draft.returnTime)
+        : 1;
     for (final id in ids) {
       final r = byId[id];
-      if (r == null ||
-          r['deleted'] == 1 ||
-          ItemStatus.fromName(r['status'] as String?) != ItemStatus.active) {
+      if (r == null || r['deleted'] == 1 || !_bookable(r, pickup)) {
         throw BookingException(
           BookingError.itemUnavailable,
           (r?['name'] as String?) ?? '',
         );
       }
       final type = RateType.fromName(r['rate_type'] as String?);
-      final rate = (r['rate'] as num).toDouble();
+      final itemRate = (r['rate'] as num).toDouble();
+      final rate = draft.rates[id] ?? itemRate;
+      final deposit = draft.deposits[id] ?? (r['deposit'] as num).toDouble();
+      if (rate < 0 || deposit < 0) {
+        throw const BookingException(BookingError.badAmount);
+      }
       final qty = draft.qtyOf(id);
-      amounts.add(r2(lineAmount(type, rate, pickup, ret) * qty));
+      // an hourly item pays for at least its minimum hours
+      final minHours = ((r['min_hours'] as num?)?.toInt() ?? 1).clamp(1, 1 << 30);
+      final lineHours = type.isHourly && minHours > hours ? minHours : hours;
+      // weekly and monthly rates apply while the daily rent is the usual one;
+      // a rent the shop agreed for this booking is charged as agreed
+      final tiers = rate == itemRate;
+      amounts.add(
+        r2(
+          lineAmount(
+                type,
+                rate,
+                pickup,
+                ret,
+                hours: lineHours,
+                weekRate: tiers ? (r['week_rate'] as num?)?.toDouble() ?? 0 : 0,
+                monthRate: tiers ? (r['month_rate'] as num?)?.toDouble() ?? 0 : 0,
+              ) *
+              qty,
+        ),
+      );
       rates.add((r['gst_rate'] as num?)?.toDouble() ?? 0);
       base.add({
         'item_id': id,
         'name': r['name'],
         'rate_type': type.name,
         'qty': qty,
+        'hours': type.isHourly ? lineHours : 1,
         'rate': rate,
-        'deposit': (r['deposit'] as num).toDouble(),
+        'deposit': deposit,
         'hsn': (r['hsn'] as String?) ?? '',
       });
     }
@@ -799,6 +1006,8 @@ class BookingRepo {
             draft.quantities,
             pickup,
             ret,
+            hourly ? draft.pickupTime : '',
+            hourly ? draft.returnTime : '',
             exceptBookingId,
             now,
           )
@@ -813,6 +1022,7 @@ class BookingRepo {
       );
     }
     return _Prepared(
+      hourly: hourly,
       lines: lines,
       rent: rent,
       deposit: r2(
@@ -824,6 +1034,27 @@ class BookingRepo {
       tax: r2(money.fold(0.0, (a, m) => a + m.tax)),
       payable: r2(money.fold(0.0, (a, m) => a + m.total)),
     );
+  }
+
+  /// [w] with the item's cleaning gap added after its end.
+  static ({DateTime from, DateTime to}) _withGap(
+    ({DateTime from, DateTime to}) w,
+    Object? bufferHours,
+  ) {
+    final h = (bufferHours as num?)?.toInt() ?? 0;
+    return h <= 0 ? w : (from: w.from, to: w.to.add(Duration(hours: h)));
+  }
+
+  /// Whether the item row can go on a booking that starts on [pickup].
+  static bool _bookable(Map<String, Object?> r, DateTime pickup) {
+    final status = ItemStatus.fromName(r['status'] as String?);
+    if (status.bookable) return true;
+    if (status == ItemStatus.retired) return false;
+    final until = r['status_until'];
+    return until is int &&
+        !dayOf(pickup).isBefore(
+          dayOf(DateTime.fromMillisecondsSinceEpoch(until)),
+        );
   }
 
   Future<void> _insertLines(
@@ -919,6 +1150,69 @@ class BookingRepo {
   /// Adds a late-return or damage charge. It is added to what the customer
   /// owes. Only a booking whose items have gone out, or are back, can be
   /// charged.
+  /// Hands back the deposit as the items come in: [refund] goes back to the
+  /// customer and whatever of the deposit is left is kept for damage or loss.
+  /// What is kept becomes a charge on the booking (so it is on the invoice and
+  /// in the reports) and is taken from the deposit, not asked for again.
+  /// [reason] says why some was kept. Nothing is kept when [refund] equals the
+  /// deposit held.
+  Future<void> settleDeposit(
+    int bookingId, {
+    required double refund,
+    PayMode mode = PayMode.cash,
+    String reason = '',
+    DateTime? now,
+  }) async {
+    final b = await get(bookingId);
+    if (b == null) throw const BookingException(BookingError.badState);
+    final held = b.depositHeld;
+    final back = r2(refund);
+    if (back < 0 || back > held + 0.005) {
+      throw const BookingException(BookingError.badAmount);
+    }
+    final kept = r2(held - back);
+    final at = now ?? DateTime.now();
+    final why = reason.trim();
+    if (kept > 0.004) {
+      final note = why.isEmpty ? 'Kept from the deposit' : why;
+      await addCharge(
+        bookingId,
+        kind: ChargeKind.damage,
+        amount: kept,
+        note: note,
+        now: at,
+      );
+      // paid out of the deposit: the damage charge is settled from it, so
+      // nothing is owed and no cash moves
+      await addPayment(
+        bookingId,
+        kind: PaymentKind.balance,
+        amount: kept,
+        mode: mode,
+        note: 'Taken from the deposit',
+        at: at,
+      );
+      await addPayment(
+        bookingId,
+        kind: PaymentKind.keep,
+        amount: kept,
+        mode: mode,
+        note: why,
+        at: at,
+      );
+    }
+    if (back > 0.004) {
+      await addPayment(
+        bookingId,
+        kind: PaymentKind.refund,
+        amount: back,
+        mode: mode,
+        note: why.isEmpty || kept <= 0.004 ? why : '',
+        at: at,
+      );
+    }
+  }
+
   Future<int> addCharge(
     int bookingId, {
     required ChargeKind kind,
@@ -1140,7 +1434,7 @@ class BookingRepo {
       final limit = switch (kind) {
         PaymentKind.advance || PaymentKind.balance => b.balanceDue,
         PaymentKind.deposit => b.depositDue,
-        PaymentKind.refund => b.depositHeld,
+        PaymentKind.refund || PaymentKind.keep => b.depositHeld,
       };
       if (amount > limit + 0.005) {
         throw const BookingException(BookingError.badAmount);
@@ -1178,13 +1472,15 @@ class BookingRepo {
     DateTime? now,
   }) async {
     final d = await AppDatabase.instance.db;
+    // a picture of the customer's ID is kept for safety: it never uses up the
+    // free photos
     final n = Sqflite.firstIntValue(
       await d.rawQuery(
-        'SELECT COUNT(*) FROM booking_photos WHERE booking_id = ?',
+        "SELECT COUNT(*) FROM booking_photos WHERE booking_id = ? AND stage != 'id'",
         [bookingId],
       ),
     )!;
-    if (!isPro && n >= FreePlan.photosPerBooking) {
+    if (!isPro && stage != 'id' && n >= FreePlan.photosPerBooking) {
       throw const BookingException(BookingError.limitReached);
     }
     return d.insert('booking_photos', {

@@ -11,7 +11,9 @@ Enter the shop name, what you rent, your phone and address. You can change them 
 - **Menu** (top left): Reminders, Invoices, Reports, Backup and restore, Billing and GST, Account, GellSoft Pro, Settings.
 
 ## Items
-Add what you rent: name, category, size, **quantity**, rent (per event or per day), deposit. Rent and deposit are for **one piece**. With GST on, each item also has a GST rate and a SAC/HSN code (rental of goods is 9973). An item can be marked **In repair** (it cannot be booked) or **Retired**.
+Add what you rent: name, category, size, **quantity**, rent (per event, per day or **per hour**), deposit. Rent and deposit are for **one piece**. With GST on, each item also has a GST rate and a SAC/HSN code (rental of goods is 9973). An item can be marked **In repair** (it cannot be booked) or **Retired**.
+
+**Hourly rent.** Choose *Per hour* for something rented by the hour (a court, a hall, a camera). When a booking has an hourly item, the form shows a pickup time and a return time; the rent is the hourly rate times the hours, and each started hour counts (2 h 10 min is 3 hours). The same item can be booked again on the same day at other hours, and one booking may end the moment the next begins. A booking that is out is late as soon as its return time passes, and the late-fee offer counts the hours. Items rented by the day or event on the same booking still cover the whole day. An item can have a **Minimum hours** (for example 2), so a shorter use is still charged for that many hours. Reminders follow the real times: a notification an hour before the items go out and 15 minutes before they are due back.
 
 **Quantity**: a shop with ten chairs adds one item "Chair" with a quantity of 10. A booking takes as many as it needs (the **- 2 +** control on the booking), and the app counts the pieces that are still free on every day: eight chairs booked for a wedding leave two for anyone else on those days.
 
@@ -27,9 +29,15 @@ Choose **Makeup artist** as what your shop does (Settings, Shop details, or when
 **Catalog (Pro).** Tap the pictures button at the top of Items. Tick the items (those with a picture start ticked), choose whether to show the rent and deposit, then **Send on WhatsApp** or **Share**. The app makes one PDF with your name and phone at the top and your items two to a row, with their pictures. A catalog holds up to 60 items.
 
 ## Customers
+
+**Removing a customer:** tap the bin on the customer's row (or the bin in their edit page). You are asked first, and told if some of their bookings are still open or have money due. Their bookings stay and keep working; only the customer leaves the list.
 Name, phone, address and an ID note (for example "Aadhaar ending 1234": the ID itself is never stored). With GST on you can add the customer's GSTIN and state. The **Notes** box is for anything to remember, such as preferences or measurements. Tap the **history** button on a customer to see every booking they have made, what they have been billed and what they still owe, with their notes at the top.
 
 ## Booking
+
+**Changing the rent for one booking.** Customers bargain, so on the booking form tap the pencil on an item to type the rent (and deposit) you agreed. It applies to that booking only; the bill, the invoice, reports and GST sheets all use it. If you change the rent of a booking that already has an invoice, the invoice is updated too (same number and date); what the customer already paid is untouched. An edited booking keeps its agreed rent even if you later change the item's own rate.
+
+**Bike, car and other vehicle shops.** Choose *Vehicle / Bike rental* as the shop type. Items become *Vehicles*, rates are per day or per hour, and a booking has only pickup and return (no event date). Reminders and WhatsApp messages say pickup instead of event.
 1. Tap **+**. Choose the customer and the items.
 2. Set the **event**, **pickup** and **return** dates. The app refuses an item that is already booked for any of those days and says who has it.
 3. Add a discount and the advance paid. The balance, GST and deposit are shown as you type.
@@ -91,3 +99,25 @@ When you turn logins on, the app shows an 8-digit **recovery code once**: write 
 
 ## Free and Pro
 Free: 10 new bookings every month, 2 photos on each booking and 1 picture of each item, with items, customers, courier dispatch, customer history, the balance due list, invoices and GST, WhatsApp messages one at a time, and the reports on screen. Pro (Rs. 99 a month or Rs. 999 a year): unlimited bookings and photos, up to 5 pictures of each item and the catalog, your logo on invoices and receipts, spreadsheet export (including the GSTR-1 sheets for your accountant), reminding everyone who owes in one go, reminder notifications at several times a day, the daily Drive backup, more than one shop, staff logins, the availability calendar, late fee and damage charges, and the report of bookings by person. Nothing you made is ever locked: you can always view and export it.
+
+## More control for your shop
+
+**UPI QR.** In *Settings > Billing and GST* type your UPI id (for example `name@bank`). Every invoice and receipt that still has money to pay then carries a QR the customer can scan, with the amount filled in. The WhatsApp balance reminder also carries a pay link. Nothing is printed when the booking is paid in full.
+
+**Rental agreement (Pro).** On a booking, tap *Rental agreement*. It makes a PDF with both parties, the items, dates, rent, deposit, your terms and a signature line each, and sends it on WhatsApp or shares it. Write your own terms (one per line) in *Billing and GST*; leave it empty to use the standard terms (a bike or car shop gets licence and fines terms too).
+
+**ID proof.** Under the photos of a booking, tap *Add ID proof* to keep a picture of the customer's ID. These pictures never use up the free photos.
+
+**Extend or change the return.** On a booking that has not been returned, tap *Extend or change the return*. Pick a new date (and time for an hourly booking). The rent is worked out again with the rents you agreed, the item must be free for the new time, and an existing invoice is updated.
+
+**Trial or fitting date.** A costume shop can set a trial date on a booking; it shows on the booking page.
+
+**Customer warning.** Type a warning on a customer ("returned late twice"). It shows in the customer list and as a banner when that customer is booked.
+
+**Item out of service until a date.** Mark an item *In repair* or *At cleaning* and give the day it is back. It cannot be booked before then, and can be from that day on.
+
+**Deposit kept for damage.** When you hand the deposit back at return and give back less than what you hold, the rest is kept: it is added to the booking as a damage charge (with your reason), shown on the invoice, and taken from the deposit, so nothing more is owed. The booking page shows what was given back and what was kept.
+
+**Photos side by side.** When a booking has a pickup photo and a return photo, they are shown next to each other.
+
+**Pro: more control per item** (item form, *More control*): a **gap after each return** (hours blocked for cleaning or servicing), **weekly and monthly rates** (a long booking is charged by the week or month; a rent you type in by hand for one booking is charged as typed), a **late fee rate** (filled in for you when a late return is booked in) and the **repair and damage log**. *Reports* then shows **Profit by item**: rent less repairs.

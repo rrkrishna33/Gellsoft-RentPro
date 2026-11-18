@@ -105,6 +105,12 @@ class _UpgradeBody extends ConsumerWidget {
       tr('Remind everyone who owes in one go'),
       tr('More pictures of each item'),
       tr('Share a catalog of your items'),
+      tr('Rental agreement PDF'),
+      tr('A cleaning or servicing gap after every return'),
+      tr('Weekly and monthly rates'),
+      tr('A late fee rate for each item'),
+      tr('Repair and damage log for each item'),
+      tr('Profit report for each item'),
     ];
     final freeItems = [
       tr('{n} new bookings every month', {'n': FreePlan.bookingsPerMonth}),

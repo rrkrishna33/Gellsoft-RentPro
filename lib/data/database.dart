@@ -72,7 +72,24 @@ class AppDatabase {
   /// (`invoice_items.charge_id`), so removing the charge finds its line.
   ///
   /// 6 = pictures of items (`item_photos`).
-  static const schemaVersion = 6;
+  ///
+  /// 7 = hourly rent: a pickup and a return time on a booking
+  /// (`pickup_time`, `return_time`, "14:30"; '' for a booking by the day), the
+  /// least hours an item can be rented for (`items.min_hours`) and the hours a
+  /// line was charged for (`booking_items.hours`).
+  ///
+  /// 8 = makes sure the hourly-rent columns are all there. A phone that opened
+  /// an early version 7 file (only the two times) is missing `items.min_hours`
+  /// and `booking_items.hours`, and an upgrade never runs for a version it
+  /// already has.
+  ///
+  /// 9 = more control for the shop: a cleaning gap after each return
+  /// (`items.buffer_hours`), weekly and monthly rates (`items.week_rate`,
+  /// `items.month_rate`), a late fee rate (`items.late_fee`), a date an item is
+  /// back in service (`items.status_until`), a warning note on a customer
+  /// (`customers.warning`), a trial date on a booking (`bookings.trial_date`)
+  /// and the repair log (`item_repairs`).
+  static const schemaVersion = 9;
 
   /// Closes the connection; the next access reopens the file. Used by restore.
   Future<void> close() async {
@@ -98,6 +115,59 @@ class AppDatabase {
     if (from < 4) await _migrateTo4(d);
     if (from < 5) await _migrateTo5(d);
     if (from < 6) await _migrateTo6(d);
+    if (from < 7) await _migrateTo7(d);
+    if (from < 8) await _migrateTo8(d);
+    if (from < 9) await _migrateTo9(d);
+  }
+
+  @visibleForTesting
+  Future<void> migrateTo9ForTest(Database d) => _migrateTo9(d);
+
+  Future<void> _migrateTo9(Database d) async {
+    await _addColumn(d, 'items', 'buffer_hours', 'INTEGER NOT NULL DEFAULT 0');
+    await _addColumn(d, 'items', 'week_rate', 'REAL NOT NULL DEFAULT 0');
+    await _addColumn(d, 'items', 'month_rate', 'REAL NOT NULL DEFAULT 0');
+    await _addColumn(d, 'items', 'late_fee', 'REAL NOT NULL DEFAULT 0');
+    await _addColumn(d, 'items', 'status_until', 'INTEGER');
+    await _addColumn(d, 'customers', 'warning', "TEXT NOT NULL DEFAULT ''");
+    await _addColumn(d, 'bookings', 'trial_date', 'INTEGER');
+    await ensureRepairsTable(d);
+  }
+
+  /// What went wrong with an item and what it cost to put right. `booking_id`
+  /// is the booking it happened on, when known.
+  static Future<void> ensureRepairsTable(DatabaseExecutor d) async {
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS item_repairs(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        booking_id INTEGER,
+        note TEXT NOT NULL DEFAULT '',
+        cost REAL NOT NULL DEFAULT 0,
+        at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      )''');
+    await d.execute(
+      'CREATE INDEX IF NOT EXISTS idx_item_repairs_item ON item_repairs(item_id)',
+    );
+  }
+
+  @visibleForTesting
+  Future<void> migrateTo8ForTest(Database d) => _migrateTo8(d);
+
+  /// Adds whichever hourly-rent column a version 7 file is missing.
+  Future<void> _migrateTo8(Database d) => _migrateTo7(d);
+
+  @visibleForTesting
+  Future<void> migrateTo7ForTest(Database d) => _migrateTo7(d);
+
+  /// Pickup and return times. Every booking so far is by the day, so both stay
+  /// empty and nothing changes for it.
+  Future<void> _migrateTo7(Database d) async {
+    await _addColumn(d, 'bookings', 'pickup_time', "TEXT NOT NULL DEFAULT ''");
+    await _addColumn(d, 'bookings', 'return_time', "TEXT NOT NULL DEFAULT ''");
+    await _addColumn(d, 'items', 'min_hours', 'INTEGER NOT NULL DEFAULT 1');
+    await _addColumn(d, 'booking_items', 'hours', 'INTEGER NOT NULL DEFAULT 1');
   }
 
   @visibleForTesting
@@ -262,6 +332,12 @@ class AppDatabase {
         hsn TEXT NOT NULL DEFAULT '',
         gst_rate REAL NOT NULL DEFAULT 0,
         quantity INTEGER NOT NULL DEFAULT 1,
+        min_hours INTEGER NOT NULL DEFAULT 1,
+        buffer_hours INTEGER NOT NULL DEFAULT 0,
+        week_rate REAL NOT NULL DEFAULT 0,
+        month_rate REAL NOT NULL DEFAULT 0,
+        late_fee REAL NOT NULL DEFAULT 0,
+        status_until INTEGER,
         notes TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'active',
         created_at INTEGER NOT NULL
@@ -279,6 +355,7 @@ class AppDatabase {
         state_code TEXT NOT NULL DEFAULT '',
         id_note TEXT NOT NULL DEFAULT '',
         notes TEXT NOT NULL DEFAULT '',
+        warning TEXT NOT NULL DEFAULT '',
         created_at INTEGER NOT NULL
       )''');
     await d.execute('CREATE INDEX idx_customers_name ON customers(name)');
@@ -304,6 +381,9 @@ class AppDatabase {
         notes TEXT NOT NULL DEFAULT '',
         remind_days INTEGER NOT NULL DEFAULT 2,
         event_time TEXT NOT NULL DEFAULT '',
+        pickup_time TEXT NOT NULL DEFAULT '',
+        return_time TEXT NOT NULL DEFAULT '',
+        trial_date INTEGER,
         created_by TEXT NOT NULL DEFAULT '',
         courier_name TEXT NOT NULL DEFAULT '',
         courier_no TEXT NOT NULL DEFAULT '',
@@ -331,6 +411,7 @@ class AppDatabase {
         name TEXT NOT NULL,
         rate_type TEXT NOT NULL DEFAULT 'event',
         qty INTEGER NOT NULL DEFAULT 1,
+        hours INTEGER NOT NULL DEFAULT 1,
         rate REAL NOT NULL DEFAULT 0,
         deposit REAL NOT NULL DEFAULT 0,
         amount REAL NOT NULL DEFAULT 0,
@@ -362,6 +443,7 @@ class AppDatabase {
     );
     await ensureChargesTable(d);
     await ensureItemPhotosTable(d);
+    await ensureRepairsTable(d);
 
     // stage: 'pickup', 'return' or 'other'. path is a file in the app folder.
     await d.execute('''

@@ -560,7 +560,9 @@ void main() {
     expect(find.text(money(1180)), findsWidgets);
     expect(find.text(money(300)), findsWidgets, reason: 'collected');
     expect(find.text(money(880)), findsWidgets, reason: 'still to collect');
-    expect(find.text('Red gown'), findsOneWidget);
+    // the item is listed under both the top items and the profit by item
+    expect(find.text('Red gown'), findsNWidgets(2));
+    expect(find.text('Profit by item'), findsOneWidget);
     expect(find.text('Anu'), findsOneWidget);
     expect(find.text('GST in the bills'), findsOneWidget);
 
